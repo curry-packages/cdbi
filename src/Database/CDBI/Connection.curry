@@ -51,7 +51,7 @@ fromSQLResult (Right val) = val
 
 --- Print an 'SQLResult' list, i.e., print either the 'DBError'
 --- or the list of result elements.
-printSQLResults :: SQLResult [_] -> IO ()
+printSQLResults :: Show a => SQLResult [a] -> IO ()
 printSQLResults (Left  err) = putStrLn $ show err
 printSQLResults (Right res) = mapIO_ print res
 
@@ -59,6 +59,7 @@ printSQLResults (Right res) = mapIO_ print res
 --- `DBError`s are composed of an `DBErrorKind` and a `String`
 --- describing the error more explicitly.
 data DBError = DBError DBErrorKind String
+ deriving (Eq,Show)
 
 --- The different kinds of errors.
 data DBErrorKind
@@ -69,6 +70,7 @@ data DBErrorKind
   | NoLineError
   | LockedDBError
   | UnknownError
+ deriving (Eq,Show)
 
 --- Data type for SQL values, used during the communication with the database.
 data SQLValue
@@ -79,7 +81,7 @@ data SQLValue
   | SQLBool   Bool
   | SQLDate   ClockTime
   | SQLNull
-  
+  deriving Show
 
 --- Type identifiers for `SQLValue`s, necessary to determine the type
 --- of the value a column should be converted to.
