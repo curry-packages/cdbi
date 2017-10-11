@@ -1,0 +1,24 @@
+{
+    "name": "cdbi",
+    "version": "1.0.0",
+    "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
+    "synopsis": "Libraries for type-safe database programming",
+    "category": [ "Database" ],
+    "dependencies": { },
+    "exportedModules": [ "Database.ERD",
+                         "Database.CDBI.Connection",
+                         "Database.CDBI.Criteria",
+                         "Database.CDBI.Description",
+                         "Database.CDBI.ER",
+                         "Database.CDBI.QueryTypes" ],
+    "compilerCompatibility": {
+        "pakcs": ">= 1.14.0, < 2.0.0",
+        "kics2": ">= 0.5.0,  < 2.0.0"
+    },
+    "license": "BSD-3-Clause",
+    "licenseFile": "LICENSE",
+    "source": {
+        "git": "https://git.ps.informatik.uni-kiel.de/curry-packages/cdbi.git",
+        "tag": "$version"
+    }
+}
