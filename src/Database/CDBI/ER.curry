@@ -1,19 +1,22 @@
 --- ----------------------------------------------------------------------------
 --- This is the main CDBI-module. It provides datatypes and functions to
 --- do Database-Queries working with Entities (ER-Model)
---- @author Mike Tallarek, extensions by Julia Krone, Michael Hanus
 ---
---- @version 0.2
---- @category database
+--- @author Mike Tallarek, extensions by Julia Krone, Michael Hanus
 --- ----------------------------------------------------------------------------
 module Database.CDBI.ER (
     -- Database Functions
     saveEntry, saveMultipleEntries, saveEntryCombined,
     insertEntry, insertEntries, restoreEntries,
-    getEntries, getEntriesCombined, updateEntries, deleteEntries, 
+    getEntries, getEntriesCombined, updateEntries, deleteEntries,
     insertEntryCombined, updateEntry, updateEntryCombined, 
     getColumn, getColumnTuple, getColumnTriple, getColumnFourTuple, 
     getColumnFiveTuple,
+    getAllEntries, getCondEntries, getEntryWithKey, getEntriesWithColVal,
+    insertNewEntry, deleteEntry, deleteEntryR,
+    showDatabaseKey, readDatabaseKey,
+    saveDBTerms,
+    runQueryOnDB, runTransactionOnDB, runJustTransactionOnDB,
     --CDBI.Connection
     DBAction, Connection, SQLResult, printSQLResults,
     runInTransaction, (>+), (>+=),
@@ -39,8 +42,11 @@ module Database.CDBI.ER (
     caseResultInt,
     caseResultFloat, caseResultString, caseResultChar, caseResultBool) where
 
-import List (intercalate, nub)
-import Time (ClockTime)
+import Char         ( isDigit )
+import FilePath     ( (</>) )
+import List         ( intercalate, nub )
+import ReadShowTerm ( showQTerm, writeQTermListFile )
+import Time         ( ClockTime )
 
 import Database.CDBI.Connection
 import Database.CDBI.Criteria
@@ -365,10 +371,11 @@ updateEntries en xs@((ColVal cl val):ys) const conn = do
               " " ++ (trCriteria (Criteria const Nothing)) ++ ";"           
   execute query [] conn
 
---- Updates an entry by ID. Works for Entities that have a primary key as first value.
---- Function will update the entry in the
---- database with the ID of the entry that is given as parameter with the values of
---- the entry given as parameter
+--- Updates an entry by ID. Works for Entities that have a primary key
+--- as first value.
+--- This operation updates the entry in the database with the ID
+--- of the entry that is given as parameter with the values of
+--- the entry given as parameter.
 --- @param entry - The entry that will be updated
 --- @param ed -> The EntityDescription describung the entity-type
 --- @param conn -> A Connection to a database which will be used for this
@@ -382,13 +389,12 @@ updateEntry ent ed conn = do
     Left err -> return (Left err)
     Right columns -> do
       let values = getToValues ed ent
-      putStrLn (show values)
-      let (SQLInt key) = head values
-      let keycol = head columns
-      let colvals = zipWith (colValAlt table) (tail columns) (tail values)
-      let column = Column ("\"" ++ keycol ++ "\"")
+          (SQLInt key) = head values
+          keycol = head columns
+          colvals = zipWith (colValAlt table) (tail columns) (tail values)
+          column = Column ("\"" ++ keycol ++ "\"")
                            ("\"" ++ table ++ "\".\"" ++ keycol ++ "\"")
-      let const = col column .=. int key
+          const = col column .=. int key
       updateEntries ed colvals const conn   
 
 --- Same as updateEntry but for combined Data
@@ -478,3 +484,180 @@ getJoinTypes (CD nametype _ _ _) = getJoinString' (unzip3 nametype)
     where getJoinString' ((_, _, t:types)) = foldl (\a b -> a ++ b) t types
 
 
+-----------------------------------------------------------------------------
+--- Gets the key of the last inserted entity from the database.
+--- @param en - The EntityDescription that describes the entity
+--- @param conn - A Connection to a database which will be used for this
+--- @return A Result with a key or an Error if something went wrong.
+getLastInsertedKey :: EntityDescription a -> DBAction Int
+getLastInsertedKey en conn = do
+  let query = "select distinct last_insert_rowid() from '" ++ getTable en ++
+                 "';"
+  ((select query [] [SQLTypeInt]) >+= 
+    (\vals _ -> return $ selectInt vals))
+    conn
+ where
+  selectInt vals = case vals of
+    [[key]] -> maybe unknownKeyError
+                     Right
+                     (Database.CDBI.Description.intOrNothing key)
+    _ -> unknownKeyError
+
+  unknownKeyError =
+    Left (DBError UnknownError "Key of inserted entity not available")
+
+-----------------------------------------------------------------------------
+-- Some auxiliary operations for translating ER models into Curry
+-- with the erd2curry tool.
+
+--- Gets all entries of an entity stored in the database.
+--- @param endescr - the EntityDescription describing the entities
+--- @return a DB result with the list of entries if everything went right,
+---          or an error if something went wrong
+getAllEntries :: EntityDescription a -> DBAction [a]
+getAllEntries endescr =
+  getEntries All endescr (Criteria None Nothing) [] Nothing
+
+--- Gets all entries of an entity satisfying a given condition.
+--- @param endescr - the EntityDescription describing the entities
+--- @param cond    - a predicate on entities
+--- @return a DB result with the list of entries if everything went right,
+---          or an error if something went wrong
+getCondEntries :: EntityDescription a -> (a -> Bool) -> DBAction [a]
+getCondEntries endescr encond =
+  getAllEntries endescr >+= \vals _ -> return (Right (filter encond vals))
+
+--- Gets an entry of an entity with a given key.
+--- @param endescr   - the EntityDescription describing the entities
+--- @param keycolumn - the column containing the primary key
+--- @param keyval    - the id-to-value function for entities
+--- @param key       - the key of the entity to be fetched
+--- @return a DB result with the entry if everything went right,
+---         or an error if something went wrong
+getEntryWithKey :: Show kid => EntityDescription a -> Column k
+                -> (kid -> Value k) -> kid -> DBAction a
+getEntryWithKey endescr keycolumn keyval key =
+  getEntries All endescr
+    (Criteria (equal (colNum keycolumn 0) (keyval key)) Nothing)
+    []
+    Nothing >+= \vals _ ->
+  return $ if null vals then Left keyNotFoundError else Right (head vals)
+ where
+  keyNotFoundError =
+    DBError UnknownError $
+            "'" ++ getTable endescr ++ "' entity with key '" ++
+            show key ++ "' not available"
+
+--- Get all entries of an entity where some column have a given value.
+--- @param endescr   - the EntityDescription describing the entities
+--- @param valcolumn - the column containing the required value
+--- @param val       - the value required for fetched entities
+--- @return a DB result with the entry if everything went right,
+---         or an error if something went wrong
+getEntriesWithColVal :: EntityDescription a -> Column k -> Value k
+                     -> DBAction [a]
+getEntriesWithColVal endescr valcolumn val =
+  getEntries All endescr
+    (Criteria (equal (colNum valcolumn 0) val) Nothing)
+    []
+    Nothing
+
+--- Inserts a new entry of an entity and returns the new entry with the new key.
+--- @param endescr - the EntityDescription describing the inserted entities
+--- @param setkey - the operation to set the key of an entry
+--- @param keycons - the constructor for entity keys
+--- @param entity - the entity to be inserted
+--- @return a DB result without a value if everything went right, or an
+---         error if something went wrong
+insertNewEntry :: EntityDescription a -> (a -> k -> a) -> (Int -> k) -> a
+               -> DBAction a
+insertNewEntry endescr setkey keycons entity =
+  insertEntry entity endescr >+
+  getLastInsertedKey endescr >+= \key _ ->
+  return (Right (setkey entity (keycons key)))
+
+--- Deletes an existing entry from the database.
+--- @param endescr - the EntityDescription describing the entities to be deleted
+--- @param keycolumn - the column containing the primary key
+--- @param keyval - the mapping from entities to their primary keys as SQL vals
+--- @param entity - the entity to be deleted
+--- @return a DB result without a value if everything went right, or an
+---         error if something went wrong
+deleteEntry :: EntityDescription a -> Column k -> (a -> Value k) -> a
+            -> DBAction ()
+deleteEntry endescr keycolumn keyval entity =
+  deleteEntries endescr (Just (equal (colNum keycolumn 0) (keyval entity)))
+
+--- Deletes an existing binary relation entry from the database.
+--- @param endescr - the EntityDescription describing the entities to be deleted
+--- @param keycol1 - the column containing the first key
+--- @param keyval1 - the value of the first key to be deleted
+--- @param keycol2 - the column containing the second key
+--- @param keyval2 - the value of the second key to be deleted
+--- @return a DB result without a value if everything went right, or an
+---         error if something went wrong
+deleteEntryR :: EntityDescription a -> Column k1 -> Value k1
+             -> Column k2 -> Value k2 -> DBAction ()
+deleteEntryR endescr keycol1 keyval1 keycol2 keyval2 =
+  deleteEntries endescr (Just (And [equal (colNum keycol1 0) keyval1,
+                                    equal (colNum keycol2 0) keyval2]))
+
+--- Shows a database key for an entity name as a string.
+--- Useful if a textual representation of a database key is necessary,
+--- e.g., as URL parameters in web pages. This textual representation
+--- should not be used to store database keys in attributes!
+showDatabaseKey :: String -> (enkey -> Int) -> enkey -> String
+showDatabaseKey enname fromenkey enkey = enname ++ show (fromenkey enkey)
+
+--- Transforms a string into a key for an entity name.
+--- Nothing is returned if the string does not represent a reasonable key.
+readDatabaseKey :: String -> (Int -> enkey) -> String -> Maybe enkey
+readDatabaseKey enname toenkey s =
+  let (ens,ks) = splitAt (length enname) s
+   in if ens==enname && all isDigit ks
+        then Just (toenkey (read ks))
+        else Nothing
+
+-- Saves all entries of an entity as terms in a file.
+--- @param endescr - the EntityDescription describing the entities to be saved
+--- @param dbname - name of the database (e.g. "database.db")
+--- @param path   - directory where term file is written
+saveDBTerms :: Show a => EntityDescription a -> String -> String -> IO ()
+saveDBTerms endescr dbname path = do
+  allentries <- runQueryOnDB dbname (getAllEntries endescr)
+  let savefile = path </> getTable endescr ++ ".terms"
+  if null path
+   then putStrLn (unlines (map showQTerm allentries)) -- show only
+   else do putStrLn $ "Saving into " ++ savefile
+           writeQTermListFile savefile allentries
+
+--- Executes a DB action on a database and returns the result.
+--- An error is raised if the DB action produces an error.
+--- @param dbname   - name of the database (e.g. "database.db")
+--- @param dbaction - a database action
+--- @return the result of the action
+runQueryOnDB :: String -> DBAction a -> IO a
+runQueryOnDB dbname dbaction =
+  runWithDB dbname dbaction >>= return . fromSQLResult
+
+--- Executes a DB action as a transcation on a database and returns the result.
+--- If the DB action produces an error, the transaction is rolled back
+--- and the error is returned, otherwise the transaction is committed.
+--- @param str - name of the database (e.g. "database.db")
+--- @param dbaction - a database action
+--- @return the result of the action
+runTransactionOnDB :: String -> DBAction a -> IO (SQLResult a)
+runTransactionOnDB dbname dbaction =
+  runWithDB dbname (runInTransaction dbaction)
+
+--- Executes a DB action as a transcation on a database and returns the result.
+--- An error is raised if the DB action produces an error so that the
+--- transaction is rolled back.
+--- @param str - name of the database (e.g. "database.db")
+--- @param dbaction - a database action
+--- @return the result of the action
+runJustTransactionOnDB :: String -> DBAction a -> IO a
+runJustTransactionOnDB dbname dbaction =
+  runWithDB dbname (runInTransaction dbaction) >>= return . fromSQLResult
+
+----------------------------------------------------------------------------

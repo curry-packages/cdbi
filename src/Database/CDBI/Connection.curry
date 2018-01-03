@@ -5,16 +5,16 @@
 --- with types. Allowed datatypes for these queries are defined and
 --- the conversion to standard SQL-Queries is provided.
 ---
---- @author Mike Tallarek
---- @version 0.2
---- @category database
+--- @author Mike Tallarek, Michael Hanus
 --- ----------------------------------------------------------------------------
 module Database.CDBI.Connection
   ( -- Basis types and operations
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , runInTransaction, fail, ok, (>+), (>+=), executeRaw, execute, select
+  , runInTransaction, fail, ok, (>+), (>+=)
+  , sequenceDBAction, sequenceDBAction_, mapDBAction, mapDBAction_
+  , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
   , connectSQLite, disconnect, begin, commit, rollback, runWithDB
@@ -142,7 +142,32 @@ fail err _ = return (Left err)
 ok :: a -> DBAction a
 ok val _ = return (Right val)
 
---- execute a query where the result of the execution is returned
+--- Executes a list of DB actions sequentially and returns the list
+--- of all results.
+sequenceDBAction :: [DBAction a] -> DBAction [a]
+sequenceDBAction = foldr seqT (ok [])
+ where
+  seqT t ts = t >+= \x -> ts >+= \xs -> ok (x:xs)
+
+--- Executes a list of DB actions sequentially, ignoring their
+--- results.
+sequenceDBAction_ :: [DBAction _] -> DBAction ()
+sequenceDBAction_ = foldr (>+) (ok ())
+
+--- Applies a function that yields DB actions to all elements of a
+--- list, executes the transaction sequentially, and collects their
+--- results.
+mapDBAction :: (a -> DBAction b) -> [a] -> DBAction [b]
+mapDBAction f = sequenceDBAction . map f
+
+--- Applies a function that yields DB actions to all elements of a
+--- list, executes the transactions sequentially, and ignores their
+--- results.
+mapDBAction_ :: (a -> DBAction _) -> [a] -> DBAction ()
+mapDBAction_ f = sequenceDBAction_ . map f
+
+-----------------------------------------------------------------------------
+--- Execute a query where the result of the execution is returned.
 --- @param query - The SQL Query as a String, might have '?' as placeholder
 --- @param values - A list of SQLValues that replace the '?' placeholder
 --- @param types - A list of SQLTypes that describe the types of the
@@ -235,15 +260,15 @@ readRawConnection (SQLiteConnection h) =
            return inp
    else hGetLine h
 
---- Begin a Transaction.
+--- Begin a transaction.
 begin :: Connection -> IO ()
 begin conn@(SQLiteConnection _) = writeConnection "begin;" conn
 
---- Commit a Transaction.
+--- Commit a transaction.
 commit :: Connection -> IO ()
 commit conn@(SQLiteConnection _) = writeConnection "commit;" conn
 
---- Rollback a Transaction.
+--- Rollback a transaction.
 rollback :: Connection -> IO ()
 rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
 
