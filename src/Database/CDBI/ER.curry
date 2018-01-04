@@ -6,16 +6,15 @@
 --- ----------------------------------------------------------------------------
 module Database.CDBI.ER (
     -- Database Functions
-    saveEntry, saveMultipleEntries, saveEntryCombined,
-    insertEntry, insertEntries, restoreEntries,
+    insertEntry, insertEntries, insertEntryCombined, restoreEntries,
     getEntries, getEntriesCombined, updateEntries, deleteEntries,
-    insertEntryCombined, updateEntry, updateEntryCombined, 
+    updateEntry, updateEntryCombined, 
     getColumn, getColumnTuple, getColumnTriple, getColumnFourTuple, 
     getColumnFiveTuple,
     getAllEntries, getCondEntries, getEntryWithKey, getEntriesWithColVal,
     insertNewEntry, deleteEntry, deleteEntryR,
     showDatabaseKey, readDatabaseKey,
-    saveDBTerms,
+    saveDBTerms, restoreDBTerms,
     runQueryOnDB, runTransactionOnDB, runJustTransactionOnDB,
     --CDBI.Connection
     DBAction, Connection, SQLResult, printSQLResults,
@@ -45,7 +44,7 @@ module Database.CDBI.ER (
 import Char         ( isDigit )
 import FilePath     ( (</>) )
 import List         ( intercalate, nub )
-import ReadShowTerm ( showQTerm, writeQTermListFile )
+import ReadShowTerm ( showQTerm, readQTermListFile, writeQTermListFile )
 import Time         ( ClockTime )
 
 import Database.CDBI.Connection
@@ -69,10 +68,6 @@ insertEntry a en conn = do
               ++ "' values("++ (questionmarks en) ++");")
   execute query ((getToInsertValues en) a) conn
 
---- Saves an entry to the database (only for backward compatibility).
-saveEntry :: a -> EntityDescription a -> DBAction ()
-saveEntry = insertEntry
-
 --- Inserts several entries into the database.
 --- @param xs - The list of entries to save
 --- @param en - The EntityDescription that describes the entities to be saved
@@ -87,10 +82,6 @@ insertEntries xs en conn = do
   let query = ("insert into '" ++ (getTable en) ++
                "' values("++ (questionmarks en) ++");")
   executeMultipleTimes query (map (getToInsertValues en) xs) conn
-
---- Saves multiple entries to the database (only for backward compatibility).
-saveMultipleEntries :: [a] -> EntityDescription a -> DBAction ()
-saveMultipleEntries = insertEntries
 
 --- Stores entries with their current keys in the database.
 --- It is an error if entries with the same key are already in the database.
@@ -344,10 +335,6 @@ insertEntryCombined ent (CD desc _ _ f3) conn = foldIO save
                                  ++ "' values(" ++
                                  (questionmarksHelp (length types)) ++");")
                        execute query vals conn
-
---- Saves combined entries (for backward compatibility).
-saveEntryCombined :: a -> CombinedDescription a -> DBAction ()
-saveEntryCombined = insertEntryCombined
 
 --- Updates entries depending on wether they fulfill the criteria or not
 --- @param en - The EntityDescription descriping the Entities that are to be
@@ -619,17 +606,32 @@ readDatabaseKey enname toenkey s =
         else Nothing
 
 -- Saves all entries of an entity as terms in a file.
---- @param endescr - the EntityDescription describing the entities to be saved
---- @param dbname - name of the database (e.g. "database.db")
---- @param path   - directory where term file is written
+--- @param endescr - the EntityDescription of the entities to be saved
+--- @param dbname  - name of the database (e.g. "database.db")
+--- @param path    - directory where term file is written
 saveDBTerms :: Show a => EntityDescription a -> String -> String -> IO ()
 saveDBTerms endescr dbname path = do
   allentries <- runQueryOnDB dbname (getAllEntries endescr)
   let savefile = path </> getTable endescr ++ ".terms"
   if null path
    then putStrLn (unlines (map showQTerm allentries)) -- show only
-   else do putStrLn $ "Saving into " ++ savefile
+   else do putStr $ "Saving into '" ++ savefile ++ "'..."
            writeQTermListFile savefile allentries
+           putStrLn "done"
+
+--- Restores entries saved in a term file by deleting all existing entries
+--- and inserting the saved entries.
+--- @param endescr - the EntityDescription of the entities to be restored
+--- @param dbname  - name of the database (e.g. "database.db")
+--- @param path    - directory where term file was saved
+restoreDBTerms :: Read a => EntityDescription a -> String -> String -> IO ()
+restoreDBTerms endescr dbname path = do
+  let savefile = path </> getTable endescr ++ ".terms"
+  putStr $ "Restoring from '" ++ savefile ++ "'..."
+  entries <- readQTermListFile savefile
+  runJustTransactionOnDB dbname
+    (deleteEntries endescr Nothing >+ restoreEntries entries endescr)
+  putStrLn "done"
 
 --- Executes a DB action on a database and returns the result.
 --- An error is raised if the DB action produces an error.
