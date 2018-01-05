@@ -155,7 +155,7 @@ ok val _ = return (Right val)
 --- successful, otherwise an Error
 select :: String -> [SQLValue] -> [SQLType] -> DBAction [[SQLValue]]
 select query values types conn = 
-  (executeRaw query (valuesToString values) >+=
+  (executeRaw query (map valueToString values) >+=
   (\a _ -> return (convertValues a types))) conn
 
 --- execute a query without a result
@@ -165,7 +165,7 @@ select query values types conn =
 --- @return An empty if the execution was successful, otherwise an error
 execute :: String -> [SQLValue] -> DBAction ()
 execute query values conn = 
-  (executeRaw query (valuesToString values)  >+
+  (executeRaw query (map valueToString values)  >+
   (\_ -> return (Right ()))) conn
   
 --- execute a query multiple times with different SQLValues without a result
@@ -412,15 +412,12 @@ getErrorKindSQLite str
 -- -----------------------------------------------------------------------------
 
 
--- Converts SQLValues to their String representation
-valuesToString :: [SQLValue] -> [String]
-valuesToString xs = map valueToString xs
-
+-- Converts an SQLValue to its string representation.
 valueToString :: SQLValue -> String
 valueToString x = replaceEmptyString $
   case x of
-    SQLString a            -> "'" ++ doubleApostrophes a ++ "'"
-    SQLChar a              -> "'" ++doubleApostrophes [a] ++ "'"  
+    SQLString a            -> "'" ++ encodeStringToSQL a ++ "'"
+    SQLChar a              -> "'" ++ encodeStringToSQL [a] ++ "'"  
     SQLNull                -> "NULL" 
     SQLDate a              -> "'" ++ show (toUTCTime a) ++ "'"
     SQLInt a               -> show a--"'" ++ show a ++ "'"
@@ -433,60 +430,85 @@ replaceEmptyString str = case str of
   "''" -> "NULL"
   st   -> st
 
--- Converts Stringrepresentations of SQLValues to their SQLValues
--- Every list of Strings in the first parameter represents a data-type
+-- Converts String representations of SQLValues to their SQLValues
+-- Every list of strings in the first parameter represents a data-type
 -- of multiple values
 -- The list of SQLTypes tells the function what kind of SQLValues should be parsed
 convertValues :: [[String]] -> [SQLType] -> SQLResult [[SQLValue]]
 convertValues (s:str) types =
-  if((length s) == (length types))
-    then Right (map (\x -> map convertValuesHelp (zip x types)) (s:str))
-    else if  ((length s) == 0)
+  if length s == length types
+    then Right (map (\x -> map convertValue (zip x types)) (s:str))
+    else if null s
            then Right []
-           else Left (DBError ParameterError "Number of returned Parameters and Types not equal")
+           else Left (DBError ParameterError
+                        "Number of returned parameters and types not equal")
 
-convertValuesHelp :: (String,SQLType) -> SQLValue
-convertValuesHelp ([], SQLTypeString) = SQLNull
+convertValue :: (String,SQLType) -> SQLValue
+convertValue (s, SQLTypeString) = if null s
+                                    then SQLNull
+                                    else SQLString (decodeStringFromSQL s)
 
-convertValuesHelp ((s:str), SQLTypeString) = (SQLString (s:str))
-
-convertValuesHelp (s, SQLTypeInt) =
-  case (readInt s) of
-    Just (a,_)   -> (SQLInt a)
+convertValue (s, SQLTypeInt) =
+  case readInt s of
+    Just (a,_)   -> SQLInt a
     Nothing      -> SQLNull
 
-convertValuesHelp (s, SQLTypeFloat) =
+convertValue (s, SQLTypeFloat) =
   if isFloat s
     then case (readsQTerm s) of
            []         -> SQLNull
            ((a,_):_)  -> SQLFloat a
     else SQLNull
 
-convertValuesHelp (s, SQLTypeBool) =
+convertValue (s, SQLTypeBool) =
   case (readsQTerm s) of
     [(True,[])]  -> SQLBool True
     [(False,[])] -> SQLBool False
     _            -> SQLNull
 
-convertValuesHelp (s, SQLTypeDate) =
-  case (readsQTerm s) of
-    [((CalendarTime a b c d e f g),[])] -> SQLDate (toClockTime (CalendarTime a b c d e f g))
-    _                                   -> SQLNull
+convertValue (s, SQLTypeDate) =
+  case readsQTerm s of
+    [(CalendarTime a b c d e f g, [])]
+       -> SQLDate (toClockTime (CalendarTime a b c d e f g))
+    _  -> SQLNull
 
-convertValuesHelp ("", SQLTypeChar) = SQLNull
+convertValue ("", SQLTypeChar) = SQLNull
 
-convertValuesHelp (s:_, SQLTypeChar) = SQLChar s
+convertValue (s:_, SQLTypeChar) = SQLChar s
 
--- replace all Apostrophes in a string with a doubled apostrophe
-doubleApostrophes :: String -> String
-doubleApostrophes (s:str) =
-  if s == '\''
-    then ("''" ++ (doubleApostrophes str))
-    else (s : (doubleApostrophes str))
 
-doubleApostrophes "" = ""
+-- Encodes a Curry string into an SQL string which allows an appropriate
+-- parsing of SQL output values. This is done by:
+-- 1. Replacing all apostrophes in a string with double apostrophes
+-- 2. Replacing all special characters (ASCII values less than 32)
+--    by "\mn" (where mn is their 2-digit ASCII value)
+-- 3. Replacing all backslashes with double backslashes
+encodeStringToSQL :: String -> String
+encodeStringToSQL "" = ""
+encodeStringToSQL (c:cs)
+ | ord c < 32 = '\\' : showN2 (ord c) ++ encodeStringToSQL cs
+ | c == '''   = "''" ++ encodeStringToSQL cs
+ | c == '\\'  = "\\\\" ++ encodeStringToSQL cs
+ | otherwise  = c : encodeStringToSQL cs
+ where
+  showN2 i = if i<10 then '0' : show i else show i
 
--- Does the String represent a Float?
+-- Decodes SQL string back into a Curry string into an SQL string.
+decodeStringFromSQL :: String -> String
+decodeStringFromSQL "" = ""
+decodeStringFromSQL (c:cs)
+ | c == '\\' = decodeBackSlash cs
+ | otherwise = c : decodeStringFromSQL cs
+ where
+  decodeBackSlash [] = "\\"
+  decodeBackSlash (d:ds)
+    | d=='\\'   = '\\' : decodeStringFromSQL ds
+    | null ds   = '\\' : d : decodeStringFromSQL ds -- shoud not occur
+    | otherwise = case readInt [d, head ds] of
+                    Just (v,[]) -> chr v : decodeStringFromSQL (tail ds)
+                    _ -> '\\' : d : decodeStringFromSQL ds -- shoud not occur
+
+-- Does a string represent a Float?
 isFloat :: String -> Bool
 isFloat [a] = isDigit a
 isFloat (a:b:_) = (isDigit a) || (isDigit b && a == '-')
