@@ -57,45 +57,45 @@ import Database.CDBI.QueryTypes
 -- -----------------------------------------------------------------------------
 
 --- Inserts an entry into the database.
---- @param a - The entry to save
---- @param en - The EntityDescription that describes the entity to be saved
+--- @param ed - The EntityDescription that describes the entity to be saved
+--- @param ent - The entry to be inserted
 --- @param conn - A Connection to a database which will be used for this
 --- @return A Result without parameter if saving worked or an Error if there
 --- was a problem
-insertEntry :: a -> EntityDescription a -> DBAction ()
-insertEntry a en conn = do
-  let query = ("insert into '" ++ (getTable en)
-              ++ "' values("++ (questionmarks en) ++");")
-  execute query ((getToInsertValues en) a) conn
+insertEntry :: EntityDescription a -> a -> DBAction ()
+insertEntry ed ent conn = do
+  let query = ("insert into '" ++ getTable ed ++
+               "' values("++ questionmarks ed ++");")
+  execute query ((getToInsertValues ed) ent) conn
 
 --- Inserts several entries into the database.
---- @param xs - The list of entries to save
---- @param en - The EntityDescription that describes the entities to be saved
+--- @param ed - The EntityDescription that describes the entities to be saved
+--- @param xs - The list of entries to be inserted
 --- @param conn - A Connection to a database which will be used for this
 --- @return A Result without parameter if saving worked or an Error if there
 --- was a problem. If one saving operation reports an error, every following
 --- saving operation will be aborted but every saving operation up to that
 --- point will be executed. If these executed saving operations should also
 --- be discarded withTransaction or begin/commit/rollback should be used
-insertEntries :: [a] -> EntityDescription a -> DBAction ()
-insertEntries xs en conn = do
-  let query = ("insert into '" ++ (getTable en) ++
-               "' values("++ (questionmarks en) ++");")
-  executeMultipleTimes query (map (getToInsertValues en) xs) conn
+insertEntries :: EntityDescription a -> [a] -> DBAction ()
+insertEntries ed xs conn = do
+  let query = ("insert into '" ++ getTable ed ++
+               "' values("++ questionmarks ed ++");")
+  executeMultipleTimes query (map (getToInsertValues ed) xs) conn
 
 --- Stores entries with their current keys in the database.
 --- It is an error if entries with the same key are already in the database.
 --- Thus, this operation is useful only to restore a database with saved data.
---- @param xs - The list of entries to save
 --- @param en - The EntityDescription that describes the entities to be saved
+--- @param xs - The list of entries to stored
 --- @param conn - A Connection to a database which will be used for this
 --- @return A Result without parameter if saving worked or an Error if there
 --- was a problem. If one saving operation reports an error, every following
 --- saving operation will be aborted but every saving operation up to that
 --- point will be executed. If these executed saving operations should also
 --- be discarded withTransaction or begin/commit/rollback should be used
-restoreEntries :: [a] -> EntityDescription a -> DBAction ()
-restoreEntries xs en conn = do
+restoreEntries :: EntityDescription a -> [a] -> DBAction ()
+restoreEntries en xs conn = do
   let query = ("insert into '" ++ (getTable en) ++
                "' values("++ (questionmarks en) ++");")
   executeMultipleTimes query (map (getToValues en) xs) conn
@@ -316,15 +316,14 @@ getEntriesCombined spec cd@(CD _ f _ _) joins crit op limit conn = do
     Left err -> return $ Left err
                        
 --- Inserts combined entries.
---- @param a - The combined Entity to be saved
---- @param cd - The CombinedDescription that describes the entity
+--- @param cd  - The CombinedDescription that describes the entity
+--- @param ent - The combined Entity to be inserted
 --- @param conn - A Connection to a database which will be used for this
 --- @return A Result without parameter if saving worked or an Error if there
 --- was a problem
-insertEntryCombined :: a -> CombinedDescription a -> DBAction ()
-insertEntryCombined ent (CD desc _ _ f3) conn = foldIO save 
-                                                     (Right _) 
-                                                     (zip desc (f3 ent))
+insertEntryCombined :: CombinedDescription a -> a -> DBAction ()
+insertEntryCombined (CD desc _ _ f3) ent conn =
+  foldIO save (Right _) (zip desc (f3 ent))
   where
     save :: SQLResult () -> ((Table, Int, [SQLType]), [SQLValue])
          -> IO (SQLResult ())
@@ -363,13 +362,13 @@ updateEntries en xs@((ColVal cl val):ys) const conn = do
 --- This operation updates the entry in the database with the ID
 --- of the entry that is given as parameter with the values of
 --- the entry given as parameter.
+--- @param ed    - The EntityDescription describung the entity-type
 --- @param entry - The entry that will be updated
---- @param ed -> The EntityDescription describung the entity-type
---- @param conn -> A Connection to a database which will be used for this
+--- @param conn  - A Connection to a database which will be used for this
 --- @return A Result without parameter if everything went right,
 --- an Error if something went wrong
-updateEntry :: a -> EntityDescription a -> DBAction ()
-updateEntry ent ed conn = do
+updateEntry :: EntityDescription a -> a -> DBAction ()
+updateEntry ed ent conn = do
   let table = (getTable ed)
   result <- getColumnNames table conn
   case result of
@@ -385,10 +384,9 @@ updateEntry ent ed conn = do
       updateEntries ed colvals const conn   
 
 --- Same as updateEntry but for combined Data
-updateEntryCombined :: a -> CombinedDescription a -> DBAction ()
-updateEntryCombined ent (CD desc _ f2 _) conn = foldIO update 
-                                                       (Right ()) 
-                                                       (zip desc (f2 ent))
+updateEntryCombined :: CombinedDescription a -> a -> DBAction ()
+updateEntryCombined (CD desc _ f2 _) ent conn =
+  foldIO update (Right ()) (zip desc (f2 ent))
   where
     update :: SQLResult () -> ((Table, Int, [SQLType]), [SQLValue])
            -> IO (SQLResult ())
@@ -559,7 +557,7 @@ getEntriesWithColVal endescr valcolumn val =
 insertNewEntry :: EntityDescription a -> (a -> k -> a) -> (Int -> k) -> a
                -> DBAction a
 insertNewEntry endescr setkey keycons entity =
-  insertEntry entity endescr >+
+  insertEntry endescr entity >+
   getLastInsertedKey endescr >+= \key _ ->
   return (Right (setkey entity (keycons key)))
 
@@ -630,7 +628,7 @@ restoreDBTerms endescr dbname path = do
   putStr $ "Restoring from '" ++ savefile ++ "'..."
   entries <- readQTermListFile savefile
   runJustTransactionOnDB dbname
-    (deleteEntries endescr Nothing >+ restoreEntries entries endescr)
+    (deleteEntries endescr Nothing >+ restoreEntries endescr entries)
   putStrLn "done"
 
 --- Executes a DB action on a database and returns the result.
