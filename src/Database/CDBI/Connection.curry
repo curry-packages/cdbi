@@ -5,9 +5,7 @@
 --- with types. Allowed datatypes for these queries are defined and
 --- the conversion to standard SQL-Queries is provided.
 ---
---- @author Mike Tallarek
---- @version 0.2
---- @category database
+--- @author Mike Tallarek, Michael Hanus
 --- ----------------------------------------------------------------------------
 module Database.CDBI.Connection
   ( -- Basis types and operations
@@ -233,15 +231,15 @@ readRawConnection (SQLiteConnection h) =
            return inp
    else hGetLine h
 
---- Begin a Transaction.
+--- Begin a transaction.
 begin :: Connection -> IO ()
 begin conn@(SQLiteConnection _) = writeConnection "begin;" conn
 
---- Commit a Transaction.
+--- Commit a transaction.
 commit :: Connection -> IO ()
 commit conn@(SQLiteConnection _) = writeConnection "commit;" conn
 
---- Rollback a Transaction.
+--- Rollback a transaction.
 rollback :: Connection -> IO ()
 rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
 
