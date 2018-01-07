@@ -388,7 +388,7 @@ parseCSVUntil :: String -> DBAction [[String]]
 parseCSVUntil stop conn = do
   output <- readLinesUntil
   case output of Left err -> fail err conn
-                 Right csvlines -> ok (readCSV (unlines csvlines)) conn
+                 Right csvlines -> ok (concatMap readCSV csvlines) conn
  where
   readLinesUntil = do
     line <- readConnectionLine conn
