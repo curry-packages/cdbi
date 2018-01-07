@@ -31,10 +31,17 @@ import ReadNumeric  ( readInt )
 import System       ( system )
 import Time
 
+import Text.CSV     ( readCSV )
+
 --- Global flag for database debug mode.
 --- If on, all communication with database is written to stderr.
 dbDebug :: Bool
 dbDebug = False
+
+--- If this flag is true, the SQL output will be requested in csv format
+--- (which can be parsed faster than the line mode output).
+dbWithCSVMode :: Bool
+dbWithCSVMode = True
 
 -- -----------------------------------------------------------------------------
 -- Datatypes 
@@ -222,7 +229,7 @@ executeMultipleTimes query values conn = do
 --- but other types of connections could easily be added.
 --- List of functions that would need to be implemented:
 --- A function to connect to the database, disconnect, writeConnection
---- readRawConnection, parseLines, begin, commit, rollback and getColumnNames
+--- readRawConnectionLine, parseLines, begin, commit, rollback and getColumnNames
 data Connection = SQLiteConnection Handle
 
 --- Connect to a SQLite Database
@@ -234,8 +241,8 @@ connectSQLite db = do
   when (exsqlite3>0) $
     error "Database interface `sqlite3' not found. Please install package `sqlite3'!"
   h <- connectToCommand $ "sqlite3 " ++ db
-  hPutAndFlush h ".mode line"
-  hPutAndFlush h ".log stdout"
+  hPutAndFlush h (".mode " ++ if dbWithCSVMode then "csv" else "line")
+  hPutAndFlush h (".log "  ++ if dbWithCSVMode then "off" else "stdout")
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
@@ -251,9 +258,9 @@ hPutAndFlush h s = do
 writeConnection :: String -> Connection -> IO ()
 writeConnection str (SQLiteConnection h) = hPutAndFlush h str
 
---- Read a `String` from a `Connection`.
-readRawConnection :: Connection -> IO String
-readRawConnection (SQLiteConnection h) =
+--- Read a line from a `Connection`.
+readRawConnectionLine :: Connection -> IO String
+readRawConnectionLine (SQLiteConnection h) =
   if dbDebug
    then do inp <- hGetLine h
            hPutStrLn stderr ("DB<<< " ++ inp)
@@ -326,9 +333,9 @@ getColumnNames table conn@(SQLiteConnection _) = do
             retrieveColumnNames (_:y:_) = y
 
 --- Read every output line of a Connection and return a Result with a list
---- of lists of Strings where every list of Strings represents a row.
+--- of lists of strings where every list of strings represents a row.
 --- NULL-Values have to be empty Strings instead of "NULL", all other
---- values should be represented exactly as they're saved in the database
+--- values should be represented exactly as they are saved in the database
 parseLines :: DBAction [[String]]
 --- SQLite Implementation
 parseLines conn@(SQLiteConnection _) = do
@@ -337,14 +344,14 @@ parseLines conn@(SQLiteConnection _) = do
     Left  err -> fail err conn
     Right val -> do
       writeConnection ("select '" ++ val ++ "';") conn
-      parseLinesUntil val conn
+      parseSQLOutputUntil val conn
 
 --- `getRandom` requests a random number from a SQLite-database.
 getRandom :: IO (SQLResult String)
 getRandom = do
   conn <- ensureSQLiteConnection "" -- connectSQLite ""
   writeConnection "select hex(randomblob(8));" conn
-  result <- readConnection conn
+  result <- readConnectionLine conn
   --disconnect conn
   return result
 
@@ -371,21 +378,40 @@ insertParams qu xs =
       _:cs           -> countPlaceholder cs 
 
 
---- Reads the current output of sqlite line for line until a specific
---- `String` is met. This is necessary because it is otherwise not possible
+--- Reads the current output of SQLite line by line until a specific stop
+--- string is found. This is necessary because it is otherwise not possible
 --- to determine the end of the output without blocking. (SQLite-Function)
+parseSQLOutputUntil :: String -> DBAction [[String]]
+parseSQLOutputUntil = if dbWithCSVMode then parseCSVUntil else parseLinesUntil
+
+parseCSVUntil :: String -> DBAction [[String]]
+parseCSVUntil stop conn = do
+  output <- readLinesUntil
+  case output of Left err -> fail err conn
+                 Right csvlines -> ok (readCSV (unlines csvlines)) conn
+ where
+  readLinesUntil = do
+    line <- readConnectionLine conn
+    case line of
+      Left err -> fail err conn
+      Right s -> if s == stop
+                   then ok [] conn
+                   else do rest <- readLinesUntil
+                           case rest of Left err -> fail err conn
+                                        Right ls -> ok (s:ls) conn
+  
 parseLinesUntil :: String -> DBAction [[String]]
 parseLinesUntil stop conn@(SQLiteConnection _) = next
   where
   next = do
-    value <- readConnection conn
+    value <- readConnectionLine conn
     case value of
       Left (DBError NoLineError "") -> do
             rest <- next
             case rest of
               Left err -> fail err conn
               Right xs -> ok ([]:xs) conn
-      Left err  -> readRawConnection conn >> fail err conn
+      Left err  -> readRawConnectionLine conn >> fail err conn
       Right val
         | val == "index" -> next
         | val == stop -> ok [[]] conn
@@ -397,22 +423,29 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
               Right ((x:ys):xs) -> ok ((val:(x:ys)):xs) conn
 
 --- Read a line from a SQLite Connection and check if it represents a value
-readConnection :: DBAction String
-readConnection conn@(SQLiteConnection _) =
-  check `liftIO` readRawConnection conn
+readConnectionLine :: DBAction String
+readConnectionLine conn@(SQLiteConnection _) =
+  check `liftIO` readRawConnectionLine conn
  where
   --- Ensure that a line read from a database connection represents a value.
   check :: String -> SQLResult String
-  check str | null str
-            = Left (DBError NoLineError "")
-            | "Error" `isPrefixOf` str
-            = Left (DBError (getErrorKindSQLite str) str)
-            | '=' `elem` str
-            = Right (getValue str)
-            | "automatic index on" `isInfixOf` str
-            = Right "index"
-            | otherwise
-            = Left (DBError (getErrorKindSQLite str) str)
+  check s = if dbWithCSVMode then checkCSV s else checkLine s
+  
+  checkCSV s | "Error" `isPrefixOf` s
+             = Left (DBError (getErrorKindSQLite s) s)
+             | otherwise
+             = Right s
+            
+  checkLine s | null s
+              = Left (DBError NoLineError "")
+              | "Error" `isPrefixOf` s
+              = Left (DBError (getErrorKindSQLite s) s)
+              | '=' `elem` s
+              = Right (getValue s)
+              | "automatic index on" `isInfixOf` s
+              = Right "index"
+              | otherwise
+              = Left (DBError (getErrorKindSQLite s) s)
             
 --- Get the value from a line with a '='
 getValue :: String -> String
