@@ -26,7 +26,7 @@ import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 import List         ( init, insertBy, isInfixOf, isPrefixOf, tails )
-import ReadShowTerm ( readsQTerm )
+import ReadShowTerm ( readQTerm, readsQTerm, showQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
 import Time
@@ -403,10 +403,14 @@ readConnection conn@(SQLiteConnection _) =
  where
   --- Ensure that a line read from a database connection represents a value.
   check :: String -> SQLResult String
-  check str | null str                             = Left (DBError NoLineError "")
-            | "Error" `isPrefixOf` str             = Left (DBError (getErrorKindSQLite str) str)
-            | '=' `elem` str                       = Right (getValue str)
-            | "automatic index on" `isInfixOf` str = Right "index"
+  check str | null str
+            = Left (DBError NoLineError "")
+            | "Error" `isPrefixOf` str
+            = Left (DBError (getErrorKindSQLite str) str)
+            | '=' `elem` str
+            = Right (getValue str)
+            | "automatic index on" `isInfixOf` str
+            = Right "index"
             | otherwise
             = Left (DBError (getErrorKindSQLite str) str)
             
@@ -464,6 +468,7 @@ replaceEmptyString str = case str of
 -- of multiple values
 -- The list of SQLTypes tells the function what kind of SQLValues should be parsed
 convertValues :: [[String]] -> [SQLType] -> SQLResult [[SQLValue]]
+convertValues [] _ = Right [] -- this rule should not be used
 convertValues (s:str) types =
   if length s == length types
     then Right (map (\x -> map convertValue (zip x types)) (s:str))
@@ -484,13 +489,13 @@ convertValue (s, SQLTypeInt) =
 
 convertValue (s, SQLTypeFloat) =
   if isFloat s
-    then case (readsQTerm s) of
+    then case readsQTerm s of
            []         -> SQLNull
            ((a,_):_)  -> SQLFloat a
     else SQLNull
 
 convertValue (s, SQLTypeBool) =
-  case (readsQTerm s) of
+  case readsQTerm s of
     [(True,[])]  -> SQLBool True
     [(False,[])] -> SQLBool False
     _            -> SQLNull
@@ -510,31 +515,18 @@ convertValue (s:_, SQLTypeChar) = SQLChar s
 -- parsing of SQL output values. This is done by:
 -- 1. Transform the string by applying Curry's `show` operation and removing
 --    the enclosing apostrophs (i.e., encode all special chars).
--- 2. Replacing all '|' with '\|'
--- 3. Replacing all apostrophes in a string with double apostrophes
+-- 2. Replacing all apostrophes in the resulting string with double apostrophes
+--    (this is necessary to transfer the encoded string correctly to SQLite)
 encodeStringToSQL :: String -> String
-encodeStringToSQL s =
-  let '"' : shows = show s
-  in doubleQuote (init shows)
+encodeStringToSQL s = doubleQuote (init (tail (showQTerm s)))
  where
   doubleQuote "" = ""
   doubleQuote (c:cs) | c == '''  = "''" ++ doubleQuote cs
-                     | c == '|'  = "\\|" ++ doubleQuote cs
                      | otherwise = c : doubleQuote cs
 
 -- Decodes SQL string back into a Curry string into an SQL string.
 decodeStringFromSQL :: String -> String
-decodeStringFromSQL s = read ('"' : decodeString s ++ ['"'])
- where
-  decodeString "" = ""
-  decodeString (c:cs)
-    | c == '\\' = decodeBackSlash cs
-    | otherwise = c : decodeString cs
-
-  decodeBackSlash [] = "\\"
-  decodeBackSlash (d:ds)
-    | d=='|'    = '|' : decodeString ds
-    | otherwise = '\\' : decodeString (d:ds)
+decodeStringFromSQL s = readQTerm ('"' : s ++ ['"'])
 
 -- Does a string represent a Float?
 isFloat :: String -> Bool
