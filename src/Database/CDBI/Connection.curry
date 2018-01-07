@@ -25,7 +25,7 @@ import Function     ( on )
 import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
-import List         ( insertBy, isInfixOf, isPrefixOf, tails )
+import List         ( init, insertBy, isInfixOf, isPrefixOf, tails )
 import ReadShowTerm ( readsQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
@@ -398,8 +398,9 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
 
 --- Read a line from a SQLite Connection and check if it represents a value
 readConnection :: DBAction String
-readConnection conn@(SQLiteConnection _) = do check `liftIO` readRawConnection conn
-  where
+readConnection conn@(SQLiteConnection _) =
+  check `liftIO` readRawConnection conn
+ where
   --- Ensure that a line read from a database connection represents a value.
   check :: String -> SQLResult String
   check str | null str                             = Left (DBError NoLineError "")
@@ -421,8 +422,9 @@ getValue s =
       let taileq = tail (snd (break (== '=') s))
        in if null taileq then "" else let (' ':val) = taileq
                                         in val
-  where getCaseValue str = getValue (readTilEnd str)
-        readTilEnd rest = head (filter (\ls -> "end" `isPrefixOf` ls) (tails rest))
+ where
+  getCaseValue str = getValue (readTilEnd str)
+  readTilEnd rest = head (filter (\ls -> "end" `isPrefixOf` ls) (tails rest))
 
 --- Identify the error kind.
 getErrorKindSQLite :: String -> DBErrorKind
@@ -506,34 +508,33 @@ convertValue (s:_, SQLTypeChar) = SQLChar s
 
 -- Encodes a Curry string into an SQL string which allows an appropriate
 -- parsing of SQL output values. This is done by:
--- 1. Replacing all apostrophes in a string with double apostrophes
--- 2. Replacing all special characters (ASCII values less than 32)
---    by "\mn" (where mn is their 2-digit ASCII value)
--- 3. Replacing all backslashes with double backslashes
+-- 1. Transform the string by applying Curry's `show` operation and removing
+--    the enclosing apostrophs (i.e., encode all special chars).
+-- 2. Replacing all '|' with '\|'
+-- 3. Replacing all apostrophes in a string with double apostrophes
 encodeStringToSQL :: String -> String
-encodeStringToSQL "" = ""
-encodeStringToSQL (c:cs)
- | ord c < 32 = '\\' : showN2 (ord c) ++ encodeStringToSQL cs
- | c == '''   = "''" ++ encodeStringToSQL cs
- | c == '\\'  = "\\\\" ++ encodeStringToSQL cs
- | otherwise  = c : encodeStringToSQL cs
+encodeStringToSQL s =
+  let '"' : shows = show s
+  in doubleQuote (init shows)
  where
-  showN2 i = if i<10 then '0' : show i else show i
+  doubleQuote "" = ""
+  doubleQuote (c:cs) | c == '''  = "''" ++ doubleQuote cs
+                     | c == '|'  = "\\|" ++ doubleQuote cs
+                     | otherwise = c : doubleQuote cs
 
 -- Decodes SQL string back into a Curry string into an SQL string.
 decodeStringFromSQL :: String -> String
-decodeStringFromSQL "" = ""
-decodeStringFromSQL (c:cs)
- | c == '\\' = decodeBackSlash cs
- | otherwise = c : decodeStringFromSQL cs
+decodeStringFromSQL s = read ('"' : decodeString s ++ ['"'])
  where
+  decodeString "" = ""
+  decodeString (c:cs)
+    | c == '\\' = decodeBackSlash cs
+    | otherwise = c : decodeString cs
+
   decodeBackSlash [] = "\\"
   decodeBackSlash (d:ds)
-    | d=='\\'   = '\\' : decodeStringFromSQL ds
-    | null ds   = '\\' : d : decodeStringFromSQL ds -- shoud not occur
-    | otherwise = case readInt [d, head ds] of
-                    Just (v,[]) -> chr v : decodeStringFromSQL (tail ds)
-                    _ -> '\\' : d : decodeStringFromSQL ds -- shoud not occur
+    | d=='|'    = '|' : decodeString ds
+    | otherwise = '\\' : decodeString (d:ds)
 
 -- Does a string represent a Float?
 isFloat :: String -> Bool
