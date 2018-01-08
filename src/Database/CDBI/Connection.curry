@@ -12,7 +12,9 @@ module Database.CDBI.Connection
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , runInTransaction, fail, ok, (>+), (>+=), executeRaw, execute, select
+  , runInTransaction, fail, ok, (>+), (>+=)
+  , sequenceDBAction, sequenceDBAction_, mapDBAction, mapDBAction_
+  , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
   , connectSQLite, disconnect, begin, commit, rollback, runWithDB
@@ -23,16 +25,23 @@ import Function     ( on )
 import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
-import List         ( insertBy, isInfixOf, isPrefixOf, tails )
-import ReadShowTerm ( readsQTerm )
+import List         ( init, insertBy, isInfixOf, isPrefixOf, tails )
+import ReadShowTerm ( readQTerm, readsQTerm, showQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
 import Time
+
+import Text.CSV     ( readCSV )
 
 --- Global flag for database debug mode.
 --- If on, all communication with database is written to stderr.
 dbDebug :: Bool
 dbDebug = False
+
+--- If this flag is true, the SQL output will be requested in csv format
+--- (which can be parsed faster than the line mode output).
+dbWithCSVMode :: Bool
+dbWithCSVMode = True
 
 -- -----------------------------------------------------------------------------
 -- Datatypes 
@@ -138,7 +147,32 @@ fail err _ = return (Left err)
 ok :: a -> DBAction a
 ok val _ = return (Right val)
 
---- execute a query where the result of the execution is returned
+--- Executes a list of DB actions sequentially and returns the list
+--- of all results.
+sequenceDBAction :: [DBAction a] -> DBAction [a]
+sequenceDBAction = foldr seqT (ok [])
+ where
+  seqT t ts = t >+= \x -> ts >+= \xs -> ok (x:xs)
+
+--- Executes a list of DB actions sequentially, ignoring their
+--- results.
+sequenceDBAction_ :: [DBAction _] -> DBAction ()
+sequenceDBAction_ = foldr (>+) (ok ())
+
+--- Applies a function that yields DB actions to all elements of a
+--- list, executes the transaction sequentially, and collects their
+--- results.
+mapDBAction :: (a -> DBAction b) -> [a] -> DBAction [b]
+mapDBAction f = sequenceDBAction . map f
+
+--- Applies a function that yields DB actions to all elements of a
+--- list, executes the transactions sequentially, and ignores their
+--- results.
+mapDBAction_ :: (a -> DBAction _) -> [a] -> DBAction ()
+mapDBAction_ f = sequenceDBAction_ . map f
+
+-----------------------------------------------------------------------------
+--- Execute a query where the result of the execution is returned.
 --- @param query - The SQL Query as a String, might have '?' as placeholder
 --- @param values - A list of SQLValues that replace the '?' placeholder
 --- @param types - A list of SQLTypes that describe the types of the
@@ -193,7 +227,7 @@ executeMultipleTimes query values conn = do
 --- but other types of connections could easily be added.
 --- List of functions that would need to be implemented:
 --- A function to connect to the database, disconnect, writeConnection
---- readRawConnection, parseLines, begin, commit, rollback and getColumnNames
+--- readRawConnectionLine, parseLines, begin, commit, rollback and getColumnNames
 data Connection = SQLiteConnection Handle
 
 --- Connect to a SQLite Database
@@ -205,8 +239,8 @@ connectSQLite db = do
   when (exsqlite3>0) $
     error "Database interface `sqlite3' not found. Please install package `sqlite3'!"
   h <- connectToCommand $ "sqlite3 " ++ db
-  hPutAndFlush h ".mode line"
-  hPutAndFlush h ".log stdout"
+  hPutAndFlush h (".mode " ++ if dbWithCSVMode then "csv" else "line")
+  hPutAndFlush h (".log "  ++ if dbWithCSVMode then "off" else "stdout")
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
@@ -222,9 +256,9 @@ hPutAndFlush h s = do
 writeConnection :: String -> Connection -> IO ()
 writeConnection str (SQLiteConnection h) = hPutAndFlush h str
 
---- Read a `String` from a `Connection`.
-readRawConnection :: Connection -> IO String
-readRawConnection (SQLiteConnection h) =
+--- Read a line from a `Connection`.
+readRawConnectionLine :: Connection -> IO String
+readRawConnectionLine (SQLiteConnection h) =
   if dbDebug
    then do inp <- hGetLine h
            hPutStrLn stderr ("DB<<< " ++ inp)
@@ -297,9 +331,9 @@ getColumnNames table conn@(SQLiteConnection _) = do
             retrieveColumnNames (_:y:_) = y
 
 --- Read every output line of a Connection and return a Result with a list
---- of lists of Strings where every list of Strings represents a row.
+--- of lists of strings where every list of strings represents a row.
 --- NULL-Values have to be empty Strings instead of "NULL", all other
---- values should be represented exactly as they're saved in the database
+--- values should be represented exactly as they are saved in the database
 parseLines :: DBAction [[String]]
 --- SQLite Implementation
 parseLines conn@(SQLiteConnection _) = do
@@ -308,14 +342,14 @@ parseLines conn@(SQLiteConnection _) = do
     Left  err -> fail err conn
     Right val -> do
       writeConnection ("select '" ++ val ++ "';") conn
-      parseLinesUntil val conn
+      parseSQLOutputUntil val conn
 
 --- `getRandom` requests a random number from a SQLite-database.
 getRandom :: IO (SQLResult String)
 getRandom = do
   conn <- ensureSQLiteConnection "" -- connectSQLite ""
   writeConnection "select hex(randomblob(8));" conn
-  result <- readConnection conn
+  result <- readConnectionLine conn
   --disconnect conn
   return result
 
@@ -342,21 +376,40 @@ insertParams qu xs =
       _:cs           -> countPlaceholder cs 
 
 
---- Reads the current output of sqlite line for line until a specific
---- `String` is met. This is necessary because it is otherwise not possible
+--- Reads the current output of SQLite line by line until a specific stop
+--- string is found. This is necessary because it is otherwise not possible
 --- to determine the end of the output without blocking. (SQLite-Function)
+parseSQLOutputUntil :: String -> DBAction [[String]]
+parseSQLOutputUntil = if dbWithCSVMode then parseCSVUntil else parseLinesUntil
+
+parseCSVUntil :: String -> DBAction [[String]]
+parseCSVUntil stop conn = do
+  output <- readLinesUntil
+  case output of Left err -> fail err conn
+                 Right csvlines -> ok (concatMap readCSV csvlines) conn
+ where
+  readLinesUntil = do
+    line <- readConnectionLine conn
+    case line of
+      Left err -> fail err conn
+      Right s -> if s == stop
+                   then ok [] conn
+                   else do rest <- readLinesUntil
+                           case rest of Left err -> fail err conn
+                                        Right ls -> ok (s:ls) conn
+  
 parseLinesUntil :: String -> DBAction [[String]]
 parseLinesUntil stop conn@(SQLiteConnection _) = next
   where
   next = do
-    value <- readConnection conn
+    value <- readConnectionLine conn
     case value of
       Left (DBError NoLineError "") -> do
             rest <- next
             case rest of
               Left err -> fail err conn
               Right xs -> ok ([]:xs) conn
-      Left err  -> readRawConnection conn >> fail err conn
+      Left err  -> readRawConnectionLine conn >> fail err conn
       Right val
         | val == "index" -> next
         | val == stop -> ok [[]] conn
@@ -368,17 +421,29 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
               Right ((x:ys):xs) -> ok ((val:(x:ys)):xs) conn
 
 --- Read a line from a SQLite Connection and check if it represents a value
-readConnection :: DBAction String
-readConnection conn@(SQLiteConnection _) = do check `liftIO` readRawConnection conn
-  where
+readConnectionLine :: DBAction String
+readConnectionLine conn@(SQLiteConnection _) =
+  check `liftIO` readRawConnectionLine conn
+ where
   --- Ensure that a line read from a database connection represents a value.
   check :: String -> SQLResult String
-  check str | null str                             = Left (DBError NoLineError "")
-            | "Error" `isPrefixOf` str             = Left (DBError (getErrorKindSQLite str) str)
-            | '=' `elem` str                       = Right (getValue str)
-            | "automatic index on" `isInfixOf` str = Right "index"
-            | otherwise
-            = Left (DBError (getErrorKindSQLite str) str)
+  check s = if dbWithCSVMode then checkCSV s else checkLine s
+  
+  checkCSV s | "Error" `isPrefixOf` s
+             = Left (DBError (getErrorKindSQLite s) s)
+             | otherwise
+             = Right s
+            
+  checkLine s | null s
+              = Left (DBError NoLineError "")
+              | "Error" `isPrefixOf` s
+              = Left (DBError (getErrorKindSQLite s) s)
+              | '=' `elem` s
+              = Right (getValue s)
+              | "automatic index on" `isInfixOf` s
+              = Right "index"
+              | otherwise
+              = Left (DBError (getErrorKindSQLite s) s)
             
 --- Get the value from a line with a '='
 getValue :: String -> String
@@ -392,8 +457,9 @@ getValue s =
       let taileq = tail (snd (break (== '=') s))
        in if null taileq then "" else let (' ':val) = taileq
                                         in val
-  where getCaseValue str = getValue (readTilEnd str)
-        readTilEnd rest = head (filter (\ls -> "end" `isPrefixOf` ls) (tails rest))
+ where
+  getCaseValue str = getValue (readTilEnd str)
+  readTilEnd rest = head (filter (\ls -> "end" `isPrefixOf` ls) (tails rest))
 
 --- Identify the error kind.
 getErrorKindSQLite :: String -> DBErrorKind
@@ -433,6 +499,7 @@ replaceEmptyString str = case str of
 -- of multiple values
 -- The list of SQLTypes tells the function what kind of SQLValues should be parsed
 convertValues :: [[String]] -> [SQLType] -> SQLResult [[SQLValue]]
+convertValues [] _ = Right [] -- this rule should not be used
 convertValues (s:str) types =
   if length s == length types
     then Right (map (\x -> map convertValue (zip x types)) (s:str))
@@ -453,13 +520,13 @@ convertValue (s, SQLTypeInt) =
 
 convertValue (s, SQLTypeFloat) =
   if isFloat s
-    then case (readsQTerm s) of
+    then case readsQTerm s of
            []         -> SQLNull
            ((a,_):_)  -> SQLFloat a
     else SQLNull
 
 convertValue (s, SQLTypeBool) =
-  case (readsQTerm s) of
+  case readsQTerm s of
     [(True,[])]  -> SQLBool True
     [(False,[])] -> SQLBool False
     _            -> SQLNull
@@ -477,34 +544,20 @@ convertValue (s:_, SQLTypeChar) = SQLChar s
 
 -- Encodes a Curry string into an SQL string which allows an appropriate
 -- parsing of SQL output values. This is done by:
--- 1. Replacing all apostrophes in a string with double apostrophes
--- 2. Replacing all special characters (ASCII values less than 32)
---    by "\mn" (where mn is their 2-digit ASCII value)
--- 3. Replacing all backslashes with double backslashes
+-- 1. Transform the string by applying Curry's `show` operation and removing
+--    the enclosing apostrophs (i.e., encode all special chars).
+-- 2. Replacing all apostrophes in the resulting string with double apostrophes
+--    (this is necessary to transfer the encoded string correctly to SQLite)
 encodeStringToSQL :: String -> String
-encodeStringToSQL "" = ""
-encodeStringToSQL (c:cs)
- | ord c < 32 = '\\' : showN2 (ord c) ++ encodeStringToSQL cs
- | c == '''   = "''" ++ encodeStringToSQL cs
- | c == '\\'  = "\\\\" ++ encodeStringToSQL cs
- | otherwise  = c : encodeStringToSQL cs
+encodeStringToSQL s = doubleQuote (init (tail (showQTerm s)))
  where
-  showN2 i = if i<10 then '0' : show i else show i
+  doubleQuote "" = ""
+  doubleQuote (c:cs) | c == '''  = "''" ++ doubleQuote cs
+                     | otherwise = c : doubleQuote cs
 
 -- Decodes SQL string back into a Curry string into an SQL string.
 decodeStringFromSQL :: String -> String
-decodeStringFromSQL "" = ""
-decodeStringFromSQL (c:cs)
- | c == '\\' = decodeBackSlash cs
- | otherwise = c : decodeStringFromSQL cs
- where
-  decodeBackSlash [] = "\\"
-  decodeBackSlash (d:ds)
-    | d=='\\'   = '\\' : decodeStringFromSQL ds
-    | null ds   = '\\' : d : decodeStringFromSQL ds -- shoud not occur
-    | otherwise = case readInt [d, head ds] of
-                    Just (v,[]) -> chr v : decodeStringFromSQL (tail ds)
-                    _ -> '\\' : d : decodeStringFromSQL ds -- shoud not occur
+decodeStringFromSQL s = readQTerm ('"' : s ++ ['"'])
 
 -- Does a string represent a Float?
 isFloat :: String -> Bool

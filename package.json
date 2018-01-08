@@ -4,7 +4,9 @@
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
     "synopsis": "Libraries for type-safe database programming",
     "category": [ "Database" ],
-    "dependencies": { },
+    "dependencies": {
+        "csv" : ">= 1.0.0"
+    },
     "exportedModules": [ "Database.ERD",
                          "Database.CDBI.Connection",
                          "Database.CDBI.Criteria",
