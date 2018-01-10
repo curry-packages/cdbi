@@ -12,18 +12,19 @@ module Database.CDBI.QueryTypes(
    SetOp(..),Join(..),innerJoin, crossJoin,
   ColumnSingleCollection(..), ColumnTupleCollection, 
   ColumnTripleCollection, ColumnFourTupleCollection,
-  ColumnFiveTupleCollection, 
+  ColumnFiveTupleCollection, ColumnSixTupleCollection, 
   sum, avg, count, minV, maxV, none,
-  caseThen, singleCol, tupleCol, tripleCol, fourCol, fiveCol,
+  caseThen, singleCol, tupleCol, tripleCol, fourCol, fiveCol, sixCol,
   SingleColumnSelect(..), TupleColumnSelect(..),
   TripleColumnSelect(..), FourColumnSelect(..),
-  FiveColumnSelect(..), TableClause(..),
+  FiveColumnSelect(..), SixColumnSelect(..), TableClause(..),
   getSingleType, getTupleTypes, getTripleTypes, getFourTupleTypes,
-  getFiveTupleTypes, getSingleValFunc, getTupleValFuncs, getTripleValFuncs,
-  getFourTupleValFuncs, getFiveTupleValFuncs,
+  getFiveTupleTypes, getSixTupleTypes,
+  getSingleValFunc, getTupleValFuncs, getTripleValFuncs,
+  getFourTupleValFuncs, getFiveTupleValFuncs, getSixTupleValFuncs,
   trLimit, trSpecifier, trSetOp, trSingleSelectQuery, asTable,
   trTupleSelectQuery, trJoinPart1, trJoinPart2, trTripleSelectQuery,
-  trFourTupleSelectQuery, trFiveTupleSelectQuery,
+  trFourTupleSelectQuery, trFiveTupleSelectQuery, trSixTupleSelectQuery,
   caseResultInt, caseResultFloat, caseResultString, caseResultChar, 
   caseResultBool)
  where
@@ -93,7 +94,16 @@ type ColumnFiveTupleCollection a b c d e= (ColumnSingleCollection a,
                                            ColumnSingleCollection d, 
                                            ColumnSingleCollection e)
 
--- Data type to represent an aggregation function in a select-clause.                                           
+--- Datatype to select five different columns which can be of different types 
+--- and from different tables.
+type ColumnSixTupleCollection a b c d e f = (ColumnSingleCollection a, 
+                                             ColumnSingleCollection b, 
+                                             ColumnSingleCollection c, 
+                                             ColumnSingleCollection d, 
+                                             ColumnSingleCollection e,
+                                             ColumnSingleCollection f)
+
+-- Data type to represent an aggregation function in a select-clause.
 type Fun a = (String , ColumnDescription a) 
 
 --- Constructor for aggregation function sum
@@ -218,6 +228,16 @@ fiveCol :: ColumnSingleCollection a
         -> ColumnFiveTupleCollection a b c d e
 fiveCol col1 col2 col3 col4 col5 = (col1, col2, col3, col4, col5)
 
+--- Constructor function for ColumnSixTupleCollection.
+sixCol :: ColumnSingleCollection a
+        -> ColumnSingleCollection b
+        -> ColumnSingleCollection c
+        -> ColumnSingleCollection d
+        -> ColumnSingleCollection e
+        -> ColumnSingleCollection f
+        -> ColumnSixTupleCollection a b c d e f
+sixCol col1 col2 col3 col4 col5 col6 = (col1, col2, col3, col4, col5, col6)
+
 --- Datatype to describe all parts of a select-query without Setoperators 
 --- order-by and limit (selecthead) for a single column.   
 data SingleColumnSelect a  = SingleCS Specifier 
@@ -250,6 +270,13 @@ data FourColumnSelect a b c d = FourCS Specifier
 --- order-by and limit (selecthead) for five columns. 
 data FiveColumnSelect a b c d e = FiveCS Specifier
                                          (ColumnFiveTupleCollection a b c d e)
+                                         TableClause
+                                         Criteria
+
+--- Datatype to describe all parts of a select-query without Setoperators 
+--- order-by and limit (selecthead) for five columns. 
+data SixColumnSelect a b c d e f = SixCS Specifier
+                                         (ColumnSixTupleCollection a b c d e f)
                                          TableClause
                                          Criteria
 
@@ -334,6 +361,22 @@ getFiveTupleValFuncs (FiveCS _ (col1, col2, col3, col4, col5) _ _) =
   (getColumnValFunc col1, getColumnValFunc col2, getColumnValFunc col3,
     getColumnValFunc col4, getColumnValFunc col5)
 
+--selector: returns the list of SQLTypes used
+-- inside the SixColumnSelect
+getSixTupleTypes :: SixColumnSelect a b c d e f -> [SQLType]
+getSixTupleTypes (SixCS _ (col1, col2, col3, col4, col5, col6) _ _) = 
+  getColumnType col1 ++ getColumnType col2 ++ getColumnType col3 ++
+  getColumnType col4 ++ getColumnType col5 ++ getColumnType col6
+
+--selector: returns the sixtuple of functions to convert the 
+--SQLValue to the resulttype
+getSixTupleValFuncs :: SixColumnSelect a b c d e f
+  -> (SQLValue -> a, SQLValue -> b, SQLValue -> c, SQLValue -> d,
+      SQLValue -> e, SQLValue -> f)
+getSixTupleValFuncs (SixCS _ (col1, col2, col3, col4, col5, col6) _ _) = 
+  (getColumnValFunc col1, getColumnValFunc col2, getColumnValFunc col3,
+   getColumnValFunc col4, getColumnValFunc col5, getColumnValFunc col6)
+
 -- ------------------------------------------------------------------------------
 -- translation functions
 -- ------------------------------------------------------------------------------
@@ -373,6 +416,16 @@ trFiveTupleSelectQuery (FiveCS sp (col1, col2, col3, col4, col5) tabs crit) =
     getResultColumnString col2 ++", "++ getResultColumnString col3 
       ++", "++  getResultColumnString col4 ++ ", "++  getResultColumnString col5
         ++" from " ++ (getTableString tabs "") ++ trCriteria crit )
+
+-- Transform a SixTupleColumnSelect to its string representation.
+trSixTupleSelectQuery :: SixColumnSelect _ _ _ _ _ _ -> String
+trSixTupleSelectQuery (SixCS sp (col1, col2, col3, col4, col5, col6)
+                             tabs crit) =
+  ("select " ++trSpecifier sp ++ getResultColumnString col1 ++ ", "++ 
+    getResultColumnString col2 ++ ", " ++ getResultColumnString col3 ++ ", " ++
+    getResultColumnString col4 ++ ", " ++ getResultColumnString col5 ++ ", "++
+    getResultColumnString col6 ++
+    " from " ++ (getTableString tabs "") ++ trCriteria crit )
 
 -- translate set operations        
 trSetOp :: SetOp -> String

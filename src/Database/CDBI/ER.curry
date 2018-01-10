@@ -10,7 +10,7 @@ module Database.CDBI.ER (
     getEntries, getEntriesCombined, updateEntries, deleteEntries,
     updateEntry, updateEntryCombined, 
     getColumn, getColumnTuple, getColumnTriple, getColumnFourTuple, 
-    getColumnFiveTuple,
+    getColumnFiveTuple, getColumnSixTuple,
     getAllEntries, getCondEntries, getEntryWithKey, getEntriesWithColVal,
     insertNewEntry, deleteEntry, deleteEntryR,
     showDatabaseKey, readDatabaseKey,
@@ -25,11 +25,11 @@ module Database.CDBI.ER (
     Join, SetOp(..), Specifier(..), Table,
     SingleColumnSelect(..), TupleColumnSelect(..),
     TripleColumnSelect(..), FourColumnSelect(..),
-    FiveColumnSelect(..), TableClause(..),
+    FiveColumnSelect(..), SixColumnSelect(..), TableClause(..),
     CombinedDescription, combineDescriptions, addDescription, 
     innerJoin, crossJoin, caseThen,
     sum, avg, minV, maxV, none, count, 
-    singleCol, tupleCol, tripleCol, fourCol, fiveCol,   
+    singleCol, tupleCol, tripleCol, fourCol, fiveCol, sixCol,
     int, float, char, string, bool, date, col, colNum, colVal,
     -- CDBI.Criteria
     Criteria(..), emptyCriteria, Constraint(Exists, Or, And, Not, None),
@@ -253,6 +253,38 @@ getColumnFiveTuple setops (s:sels) options limit = do
                                                      (fun3 val3),
                                                      (fun4 val4),
                                                      (fun5 val5)))
+               vals
+             
+--- Gets six Columns from the database. 
+--- @param setops - list of Setoperators to combine queries if more than one is
+---                 given, can be empty otherwise
+--- @param sels - list of SixColumnSelects to specify queries, if there
+---               are more requests than can be combined with setoperators
+---               they will be ignored
+---@param options - order-by-clause for whole query
+---@param limit - value to reduce number of returned rows
+---@return a `DBAction` with a list of a-values
+---        (where a is the type of the column)
+getColumnSixTuple :: [SetOp]
+                  -> [SixColumnSelect a b c d e f]
+                  -> [Option]
+                  -> Maybe Int 
+                  -> DBAction [(a,b,c,d,e,f)]
+getColumnSixTuple _      []       _       _     = return []
+getColumnSixTuple setops (s:sels) options limit = do
+  let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
+                                           trSixTupleSelectQuery sel)
+                      (trSixTupleSelectQuery s)
+                      (zip setops sels))
+               ++ trOption options ++ trLimit limit++" ;")
+      (fun1, fun2, fun3, fun4, fun5, fun6) = getSixTupleValFuncs s
+  vals <- select query [] (getSixTupleTypes s)
+  return $ map (\ [val1, val2, val3, val4, val5, val6] -> ((fun1 val1),
+                                                           (fun2 val2), 
+                                                           (fun3 val3),
+                                                           (fun4 val4),
+                                                           (fun5 val5),
+                                                           (fun6 val6)))
                vals
              
 --- Gets combined entries from the database.
