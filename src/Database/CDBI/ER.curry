@@ -425,7 +425,7 @@ getLastInsertedKey en = do
  where
   selectInt vals = case vals of
     [[key]] -> maybe (failDB unknownKeyError)
-                     (returnDB . ok)
+                     return
                      (Database.CDBI.Description.intOrNothing key)
     _ -> failDB unknownKeyError
 

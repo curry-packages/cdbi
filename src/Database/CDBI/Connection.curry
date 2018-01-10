@@ -12,7 +12,7 @@ module Database.CDBI.Connection
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , runInTransaction, returnDB, failDB, ok, (>+), (>+=)
+  , runInTransaction, returnDB, failDB, (>+), (>+=)
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
@@ -127,14 +127,14 @@ runInTransaction act = DBAction $ \conn -> do
     Left  _ -> rollback conn >> return res
     Right _ -> commit   conn >> return res
 
---- Connect two `DBAction`s.
+--- Connects two `DBAction`s.
 --- When executed this function will execute the first `DBAction`
---- and then execute the second applied to the first result
---- An `Error` will stop either action.
+--- and then execute the second applied to the result of the first action.
+--- A database error will stop either action.
 --- @param x - The `DBAction` that will be executed first
 --- @param y - The `DBAction` hat will be executed afterwards
 --- @return A `DBAction` that wille execute both `DBAction`s.
---- The result is the result of the second `DBAction`.
+---         The result is the result of the second `DBAction`.
 (>+=) :: DBAction a -> (a -> DBAction b) -> DBAction b
 m >+= f = DBAction $ \conn -> do
   v1 <- applyDBAction m conn
@@ -142,7 +142,7 @@ m >+= f = DBAction $ \conn -> do
     Right val -> applyDBAction (f val) conn
     Left  err -> return (Left err)
 
---- Connect two DBActions, but ignore the result of the first.
+--- Connects two `DBAction`s but ignore the result of the first.
 (>+) :: DBAction a -> DBAction b -> DBAction b
 (>+) x y = x >+= (\_ -> y)
 
@@ -154,16 +154,12 @@ returnDB r = DBAction $ \_ -> return r
 failDB :: DBError -> DBAction a
 failDB err = returnDB (Left err)
 
---- The `Monad` of `DBAction`.
+--- The `Monad` instance of `DBAction`.
 instance Monad DBAction where
   a1 >>= a2 = a1 >+= a2
   a1 >>  a2 = a1 >+  a2
-  return x  = returnDB (ok x)
+  return x  = returnDB (Right x)
   fail s    = returnDB (Left (DBError UnknownError s))
-
---- A value represented as an `SQLResult`.
-ok :: a -> SQLResult a
-ok val = Right val
 
 -----------------------------------------------------------------------------
 --- Execute a query where the result of the execution is returned.
@@ -191,7 +187,7 @@ select query values types =
 --- @return An empty if the execution was successful, otherwise an error
 execute :: String -> [SQLValue] -> DBAction ()
 execute query values = 
-  executeRaw query (map valueToString values)  >+ returnDB (ok ())
+  executeRaw query (map valueToString values)  >+ return ()
   
 --- Executes a query multiple times with different SQLValues without a result
 --- @param query - The SQL Query as a String, might have '?' as placeholder
