@@ -2,11 +2,10 @@
 --- This module contains datatype declarations, constructor functions
 --- selectors and translation functions for complex select queries  
 --- in particular for those selecting (1 to 5) single columns.
---- @author Julia Krone
 ---
---- @version 0.1
---- @category database
+--- @author Julia Krone
 --- ----------------------------------------------------------------
+{-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
 
 module Database.CDBI.QueryTypes(
    SetOp(..),Join(..),innerJoin, crossJoin,

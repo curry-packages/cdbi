@@ -7,9 +7,9 @@
 --- by the use of this module.
 ---
 --- @author Mike Tallarek, changes by Julia Krone
---- @version 0.2
---- @category database
 --- ----------------------------------------------------------------------------
+{-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
+
 module Database.CDBI.Description where
 
 import Time

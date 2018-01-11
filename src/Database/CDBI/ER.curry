@@ -4,6 +4,8 @@
 ---
 --- @author Mike Tallarek, extensions by Julia Krone, Michael Hanus
 --- ----------------------------------------------------------------------------
+{-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
+
 module Database.CDBI.ER (
     -- Database Functions
     insertEntry, insertEntries, insertEntryCombined, restoreEntries,

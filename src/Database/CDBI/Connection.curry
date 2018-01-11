@@ -310,8 +310,10 @@ getColumnNames table = DBAction $ \conn -> do
   case result of
     Left err -> return (Left err)
     Right xs -> return (Right (map retrieveColumnNames xs))
-      where retrieveColumnNames :: [String] -> String
-            retrieveColumnNames (_:y:_) = y
+ where
+  retrieveColumnNames xs = case xs of
+    (_:y:_) -> y
+    _       -> error "Database.CDBI.Connection.getColumnNames: wrong arguments"
 
 --- Read every output line of a Connection and return a Result with a list
 --- of lists of strings where every list of strings represents a row.
@@ -402,6 +404,8 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
               Left  err         -> return $ Left err
               Right ([]:xs)     -> return $ Right ([val]:xs)
               Right ((x:ys):xs) -> return $ Right ((val:(x:ys)):xs)
+              Right []          ->
+               error "Database.CDBI.Connection.parseLinesUntil: wrong arguments"
 
 --- Read a line from a SQLite Connection and check if it represents a value
 readConnectionLine :: Connection -> IO (SQLResult String)

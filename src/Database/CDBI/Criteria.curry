@@ -1,11 +1,12 @@
 --- ----------------------------------------------------------------------------
 --- This module provides datatypes, constructor functions and translation
---- functions to specify SQL criteria including options(group-by, having, order-by)
+--- functions to specify SQL criteria including options
+--- (group-by, having, order-by)
 ---
 --- @author Mike Tallarek, Julia Krone
---- @version 0.2
---- @category database
 --- ----------------------------------------------------------------------------
+{-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
+
 module Database.CDBI.Criteria (
        Criteria(..), Constraint(..), ColVal(..), GroupBy,
        Option, Value(..), CValue, CColumn, Condition(..), Specifier(..),
