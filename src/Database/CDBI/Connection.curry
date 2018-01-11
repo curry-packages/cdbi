@@ -232,7 +232,7 @@ disconnect (SQLiteConnection h) = hClose h
 
 hPutAndFlush :: Handle -> String -> IO ()
 hPutAndFlush h s = do
-  when dbDebug $ hPutStrLn stderr ("DB>>> " ++ s)
+  when dbDebug $ hPutStrLn stderr ("DB>>> " ++ s) >> hFlush stderr
   hPutStrLn h s >> hFlush h
 
 --- Write a `String` to a `Connection`.
@@ -245,6 +245,7 @@ readRawConnectionLine (SQLiteConnection h) =
   if dbDebug
    then do inp <- hGetLine h
            hPutStrLn stderr ("DB<<< " ++ inp)
+           hFlush stderr
            return inp
    else hGetLine h
 
