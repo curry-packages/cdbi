@@ -12,7 +12,7 @@ module Database.CDBI.Connection
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , runInTransaction, returnDB, failDB, (>+), (>+=)
+  , runDBAction, runInTransaction, returnDB, failDB, (>+), (>+=)
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
@@ -109,9 +109,9 @@ data SQLType
 --- returns a `SQLResult a` value.
 data DBAction a = DBAction (Connection -> IO (SQLResult a))
 
---- Applies a `DBAction` to a connection.
-applyDBAction :: DBAction a -> Connection -> IO (SQLResult a)
-applyDBAction (DBAction a) conn = a conn
+--- Runs a `DBAction` on a connection.
+runDBAction :: DBAction a -> Connection -> IO (SQLResult a)
+runDBAction (DBAction a) conn = a conn
 
 --- Run a `DBAction` as a transaction.
 --- In case of an `Error` it will rollback all changes, otherwise the changes
@@ -122,7 +122,7 @@ applyDBAction (DBAction a) conn = a conn
 runInTransaction :: DBAction a -> DBAction a
 runInTransaction act = DBAction $ \conn -> do
   begin conn
-  res <- applyDBAction act conn
+  res <- runDBAction act conn
   case res of
     Left  _ -> rollback conn >> return res
     Right _ -> commit   conn >> return res
@@ -137,9 +137,9 @@ runInTransaction act = DBAction $ \conn -> do
 ---         The result is the result of the second `DBAction`.
 (>+=) :: DBAction a -> (a -> DBAction b) -> DBAction b
 m >+= f = DBAction $ \conn -> do
-  v1 <- applyDBAction m conn
+  v1 <- runDBAction m conn
   case v1 of
-    Right val -> applyDBAction (f val) conn
+    Right val -> runDBAction (f val) conn
     Left  err -> return (Left err)
 
 --- Connects two `DBAction`s but ignore the result of the first.
@@ -268,7 +268,7 @@ rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
 --- @return the result of the action
 runWithDB :: String -> DBAction a -> IO (SQLResult a)
 runWithDB dbname dbaction =
-  ensureSQLiteConnection dbname >>= applyDBAction dbaction
+  ensureSQLiteConnection dbname >>= runDBAction dbaction
 
 --- Executes an action dependent on a connection on a database
 --- by connecting and disconnecting to the datebase.
