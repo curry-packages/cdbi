@@ -241,13 +241,15 @@ writeConnection str (SQLiteConnection h) = hPutAndFlush h str
 
 --- Read a line from a `Connection`.
 readRawConnectionLine :: Connection -> IO String
-readRawConnectionLine (SQLiteConnection h) =
-  if dbDebug
-   then do inp <- hGetLine h
-           hPutStrLn stderr ("DB<<< " ++ inp)
-           hFlush stderr
-           return inp
-   else hGetLine h
+readRawConnectionLine (SQLiteConnection h) = do
+  inp <- hGetLine h >>= return . stripCR
+  when dbDebug $ hPutStrLn stderr ("DB<<< " ++ inp) >> hFlush stderr
+  return inp
+ where
+  -- Remove CR at end-of-line
+  stripCR [] = []
+  stripCR [c] = if c == '\r' then [] else [c]
+  stripCR (c:cs@(_:_)) = c : stripCR cs
 
 --- Begin a transaction.
 begin :: Connection -> IO ()
