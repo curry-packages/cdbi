@@ -219,11 +219,12 @@ data Connection = SQLiteConnection Handle
 connectSQLite :: String -> IO Connection
 connectSQLite db = do
   exsqlite3 <- system "which sqlite3 > /dev/null"
-  when (exsqlite3>0) $
-    error "Database interface `sqlite3' not found. Please install package `sqlite3'!"
-  h <- connectToCommand $ "sqlite3 " ++ db
-  hPutAndFlush h (".mode " ++ if dbWithCSVMode then "csv" else "line")
-  hPutAndFlush h (".log "  ++ if dbWithCSVMode then "off" else "stdout")
+  when (exsqlite3>0) $ error
+    "Database interface `sqlite3' not found. Please install package `sqlite3'!"
+  h <- connectToCommand $ "sqlite3 " ++ db ++ " 2>&1"
+  hPutAndFlush h $ ".mode " ++ if dbWithCSVMode then "csv" else "line"
+  hPutAndFlush h $ ".log "  ++ if dbWithCSVMode then "off" else "stdout"
+  hPutAndFlush h $ "PRAGMA foreign_keys=ON;"
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
@@ -454,10 +455,11 @@ getValue s =
 --- Identify the error kind.
 getErrorKindSQLite :: String -> DBErrorKind
 getErrorKindSQLite str
-    | "Error: UNIQUE constraint" `isPrefixOf` str = ConstraintViolation
-    | "no such table"            `isInfixOf`  str = TableDoesNotExist
-    | "syntax error"             `isInfixOf`  str = SyntaxError
-    | "Error: database is locked" `isInfixOf` str = LockedDBError
+    | "UNIQUE constraint"         `isInfixOf` str = ConstraintViolation
+    | "FOREIGN KEY constraint"    `isInfixOf` str = ConstraintViolation
+    | "no such table"             `isInfixOf` str = TableDoesNotExist
+    | "syntax error"              `isInfixOf` str = SyntaxError
+    | "database is locked"        `isInfixOf` str = LockedDBError
     | otherwise                                   = UnknownError
 
 
