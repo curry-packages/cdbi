@@ -25,7 +25,8 @@ import Function     ( on )
 import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
-import List         ( init, insertBy, isInfixOf, isPrefixOf, tails )
+import List         ( init, insertBy, intercalate, isInfixOf, isPrefixOf
+                    , nub, tails )
 import ReadShowTerm ( readQTerm, readsQTerm, showQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
@@ -115,8 +116,10 @@ runDBAction :: DBAction a -> Connection -> IO (SQLResult a)
 runDBAction (DBAction a) conn = a conn
 
 --- Run a `DBAction` as a transaction.
---- In case of an `Error` it will rollback all changes, otherwise the changes
---- are committed.
+--- In case of an error, it will rollback all changes, otherwise, the changes
+--- are committed. The transaction is also checked for foreign key errors
+--- so that a transaction will never be committed if such errors are in
+--- the database.
 --- @param act  - The `DBAction`
 --- @param conn - The `Connection` to the database on which the transaction
 --- shall be executed.
@@ -125,8 +128,19 @@ runInTransaction act = DBAction $ \conn -> do
   begin conn
   res <- runDBAction act conn
   case res of
-    Left  _ -> rollback conn >> return res
-    Right _ -> commit   conn >> return res
+    Left  e -> rollback conn >> return (Left e)
+    Right _ -> do
+      keyerrors <- runDBAction getForeignKeyErrors conn
+      case keyerrors of
+        Left err       -> rollback conn >> return (Left err)
+        Right es@(_:_) -> rollback conn >>
+                          return (Left (DBError ConstraintViolation
+                                                (showFKErrors es)))
+        Right []       -> commit conn >> return res
+ where
+  showFKErrors = intercalate "," . nub .
+    concatMap (\row -> if length row < 3 then []
+                                         else [row!!0 ++ "/" ++ row!!2])
 
 --- Connects two `DBAction`s.
 --- When executed this function will execute the first `DBAction`
@@ -207,7 +221,7 @@ executeMultipleTimes query values = mapM_ (execute query) values
 --- Data type for database connections.
 --- Currently, only connections to a SQLite3 database are supported,
 --- but other types of connections could easily be added.
---- List of functions that would need to be implemented:
+--- The following functions might need to be re-implemented for other DBs:
 --- A function to connect to the database, disconnect, writeConnection
 --- readRawConnectionLine, parseLines, begin, commit, rollback,
 --- and getColumnNames
@@ -316,7 +330,7 @@ executeRaw query para =
   
 
 --- Returns a list with the names of every column in a table
---- The parameter is the name of the table and a connection
+--- The parameter is the name of the table.
 getColumnNames :: String -> DBAction [String]
 -- SQLite implementation
 getColumnNames table = DBAction $ \conn -> do
@@ -329,6 +343,14 @@ getColumnNames table = DBAction $ \conn -> do
   retrieveColumnNames xs = case xs of
     (_:y:_) -> y
     _       -> error "Database.CDBI.Connection.getColumnNames: wrong arguments"
+
+--- Returns a list of unsatisfisfied foreign key constraints (SQLite).
+--- In a correct database state, the list should be empty.
+getForeignKeyErrors :: DBAction [[String]]
+-- SQLite implementation
+getForeignKeyErrors = DBAction $ \conn -> do
+  writeConnection ("PRAGMA foreign_key_check;") conn
+  parseLines conn
 
 --- Read every output line of a Connection and return a Result with a list
 --- of lists of strings where every list of strings represents a row.
