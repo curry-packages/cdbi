@@ -225,8 +225,6 @@ connectSQLite db = do
   h <- connectToCommand $ "sqlite3 " ++ db ++ " 2>&1"
   hPutAndFlush h $ ".mode " ++ if dbWithCSVMode then "csv" else "line"
   hPutAndFlush h $ ".log "  ++ if dbWithCSVMode then "off" else "stdout"
-  -- default: check foreign keys:
-  hPutAndFlush h $ "PRAGMA foreign_keys=ON;"
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
@@ -255,8 +253,11 @@ readRawConnectionLine (SQLiteConnection h) = do
   stripCR (c:cs@(_:_)) = c : stripCR cs
 
 --- Begin a transaction.
+--- Inside a transaction, foreign key constraints are checked.
 begin :: Connection -> IO ()
-begin conn@(SQLiteConnection _) = writeConnection "begin;" conn
+begin conn@(SQLiteConnection _) = do
+  writeConnection "begin;" conn
+  writeConnection "PRAGMA foreign_keys=ON;" conn
 
 --- Commit a transaction.
 commit :: Connection -> IO ()

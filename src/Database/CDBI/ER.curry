@@ -21,7 +21,8 @@ module Database.CDBI.ER (
     --CDBI.Connection
     DBAction, Connection, SQLResult, printSQLResults,
     runInTransaction, (>+), (>+=),
-    begin, commit, rollback, connectSQLite, disconnect, runWithDB,
+    begin, commit, rollback, connectSQLite, disconnect, setForeignKeyCheck,
+    runWithDB,
     -- Datatypes
     EntityDescription, Value, ColumnDescription,
     Join, SetOp(..), Specifier(..), Table,
@@ -604,8 +605,10 @@ restoreDBTerms endescr dbname path = do
   let savefile = path </> getTable endescr ++ ".terms"
   putStr $ "Restoring from '" ++ savefile ++ "'..."
   entries <- readQTermListFile savefile
-  runJustTransactionOnDB dbname
-    (deleteEntries endescr Nothing >+ restoreEntries endescr entries)
+  runJustTransactionOnDB dbname $ do
+    setForeignKeyCheck False
+    deleteEntries endescr Nothing
+    restoreEntries endescr entries
   putStrLn "done"
 
 --- Executes a DB action on a database and returns the result.
