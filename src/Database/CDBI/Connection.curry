@@ -26,7 +26,7 @@ import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 import List         ( init, insertBy, intercalate, isInfixOf, isPrefixOf
-                    , nub, tails )
+                    , nub, tails, (\\) )
 import ReadShowTerm ( readQTerm, readsQTerm, showQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
@@ -117,26 +117,27 @@ runDBAction (DBAction a) conn = a conn
 
 --- Run a `DBAction` as a transaction.
 --- In case of an error, it will rollback all changes, otherwise, the changes
---- are committed. The transaction is also checked for foreign key errors
---- so that a transaction will never be committed if such errors are in
---- the database.
+--- are committed. The transaction is also checked whether foreign key errors
+--- have been introduced so that a transaction which introduces
+--- foreign key errors will never be committed.
 --- @param act  - The `DBAction`
 --- @param conn - The `Connection` to the database on which the transaction
 --- shall be executed.
 runInTransaction :: DBAction a -> DBAction a
 runInTransaction act = DBAction $ \conn -> do
-  begin conn
-  res <- runDBAction act conn
+  res <- flip runDBAction conn $ do
+           begin
+           kes1 <- getForeignKeyErrors
+           r <- act
+           kes2 <- getForeignKeyErrors
+           return (kes2 \\ kes1, r)
   case res of
-    Left  e -> rollback conn >> return (Left e)
-    Right _ -> do
-      keyerrors <- runDBAction getForeignKeyErrors conn
-      case keyerrors of
-        Left err       -> rollback conn >> return (Left err)
-        Right es@(_:_) -> rollback conn >>
-                          return (Left (DBError ConstraintViolation
-                                                (showFKErrors es)))
-        Right []       -> commit conn >> return res
+    Left err -> runDBAction rollback conn >> return (Left err)
+    Right (newkes,ares) ->
+      if null newkes
+        then runDBAction commit   conn >> return (Right ares)
+        else runDBAction rollback conn >>
+             return (Left (DBError ConstraintViolation (showFKErrors newkes)))
  where
   showFKErrors = intercalate "," . nub .
     concatMap (\row -> if length row < 3 then []
@@ -268,18 +269,24 @@ readRawConnectionLine (SQLiteConnection h) = do
 
 --- Begin a transaction.
 --- Inside a transaction, foreign key constraints are checked.
-begin :: Connection -> IO ()
-begin conn@(SQLiteConnection _) = do
+begin :: DBAction ()
+begin = DBAction $ \conn -> do
   writeConnection "begin;" conn
   writeConnection "PRAGMA foreign_keys=ON;" conn
+  return (Right ())
 
 --- Commit a transaction.
-commit :: Connection -> IO ()
-commit conn@(SQLiteConnection _) = writeConnection "commit;" conn
+commit :: DBAction ()
+commit = DBAction $ \conn -> do
+  writeConnection "commit;" conn
+  return (Right ())
+
 
 --- Rollback a transaction.
-rollback :: Connection -> IO ()
-rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
+rollback :: DBAction ()
+rollback = DBAction $ \conn -> do
+  writeConnection "rollback;" conn
+  return (Right ())
 
 --- Turn on/off checking of foreign key constraints (SQLite3).
 setForeignKeyCheck :: Bool -> DBAction ()
