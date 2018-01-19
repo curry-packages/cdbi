@@ -16,7 +16,8 @@ module Database.CDBI.Connection
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
-  , connectSQLite, disconnect, begin, commit, rollback, runWithDB
+  , connectSQLite, disconnect, begin, commit, rollback, setForeignKeyCheck
+  , runWithDB
   ) where
 
 import Char         ( isDigit )
@@ -224,6 +225,7 @@ connectSQLite db = do
   h <- connectToCommand $ "sqlite3 " ++ db ++ " 2>&1"
   hPutAndFlush h $ ".mode " ++ if dbWithCSVMode then "csv" else "line"
   hPutAndFlush h $ ".log "  ++ if dbWithCSVMode then "off" else "stdout"
+  -- default: check foreign keys:
   hPutAndFlush h $ "PRAGMA foreign_keys=ON;"
   return $ SQLiteConnection h
 
@@ -263,6 +265,14 @@ commit conn@(SQLiteConnection _) = writeConnection "commit;" conn
 --- Rollback a transaction.
 rollback :: Connection -> IO ()
 rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
+
+--- Turn on/off checking of foreign key constraints (SQLite3).
+setForeignKeyCheck :: Bool -> DBAction ()
+setForeignKeyCheck flag = DBAction $ \conn -> do
+  writeConnection ("PRAGMA foreign_keys=" ++ showFlag ++ ";") conn
+  return (Right ())
+ where
+  showFlag = if flag then "ON" else "OFF"
 
 --- Executes an action dependent on a connection on a database
 --- by connecting to the datebase. The connection will be kept open
@@ -307,7 +317,7 @@ executeRaw query para =
 --- Returns a list with the names of every column in a table
 --- The parameter is the name of the table and a connection
 getColumnNames :: String -> DBAction [String]
--- SQLite Implementation
+-- SQLite implementation
 getColumnNames table = DBAction $ \conn -> do
   writeConnection ("pragma table_info(" ++ table ++ ");") conn
   result <- parseLines conn
@@ -324,7 +334,7 @@ getColumnNames table = DBAction $ \conn -> do
 --- NULL-Values have to be empty Strings instead of "NULL", all other
 --- values should be represented exactly as they are saved in the database
 parseLines :: Connection -> IO (SQLResult [[String]])
---- SQLite Implementation
+--- SQLite implementation
 parseLines conn@(SQLiteConnection _) = do
   random <- getRandom
   case random of
@@ -367,7 +377,7 @@ insertParams qu xs =
 
 --- Reads the current output of SQLite line by line until a specific stop
 --- string is found. This is necessary because it is otherwise not possible
---- to determine the end of the output without blocking. (SQLite-Function)
+--- to determine the end of the output without blocking. (SQLite function)
 parseSQLOutputUntil :: String -> Connection -> IO (SQLResult [[String]])
 parseSQLOutputUntil = if dbWithCSVMode then parseCSVUntil else parseLinesUntil
 
