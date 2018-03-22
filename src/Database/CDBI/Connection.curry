@@ -16,7 +16,8 @@ module Database.CDBI.Connection
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
-  , connectSQLite, disconnect, begin, commit, rollback, setForeignKeyCheck
+  , connectSQLite, disconnect, writeConnection
+  , begin, commit, rollback, setForeignKeyCheck
   , runWithDB
   ) where
 
