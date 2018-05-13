@@ -4,7 +4,7 @@
 --- from a term file.
 ---
 --- @author Michael Hanus, Marion Mueller
---- @version May 2017
+--- @version April 2018
 --- @category database
 ------------------------------------------------------------------------------
 
@@ -22,25 +22,45 @@ import ReadShowTerm (readUnqualifiedTerm)
 import Time
 
 --- Data type to represent entity/relationship diagrams.
+--- The components are the name of the ER model, the list of entities,
+--- and the list of relationships.
 data ERD = ERD ERDName [Entity] [Relationship]
 
+--- The name of an ER model (a string).
 type ERDName = String -- used as the name of the generated module
 
-
+--- Data type to represent the entities of an ER model.
+--- Each entity consists of a name and a list of attributes.
 data Entity = Entity EName [Attribute]
 
+--- The name of an entity (a string).
 type EName = String
 
+--- Data type to represent attributes of entities of an ER model.
+--- Each attribute consists of
+--- * a name
+--- * the domain (i.e., type) of the attribute
+--- * a value specifying the key property of thi attribute
+---   (no key, primary key, or unique)
+--- * a flag indicating whether this attribute can contain null values
 data Attribute = Attribute AName Domain Key Null
 
+--- The name of an attribute (a string).
 type AName = String
 
+--- Data type to represent key properties of attributes
+--- (no key, primary key, or unique).
 data Key = NoKey
          | PKey
          | Unique
 
+--- Type of the flag of an attribute indicating whether the attribute
+--- can contain null values (if the flag has value `True`).
 type Null = Bool
 
+--- Data type the domain of an attribute.
+--- If the attribute has a default value, it can be specified
+--- as an argument in the domain.
 data Domain = IntDom      (Maybe Int)
             | FloatDom    (Maybe Float)
             | CharDom     (Maybe Char)
@@ -51,12 +71,19 @@ data Domain = IntDom      (Maybe Int)
             | KeyDom      String  -- for foreign keys
 
 
+--- Data type to represent the relationships of an ER model.
+--- Each relationship consists of a name and a list of end points
+--- (usually with two elements).
 data Relationship = Relationship RName [REnd]
 
+--- The name of a relationship (a string).
 type RName = String
 
+--- An end point of a relationship which consists of the name
+--- of an entity, the name of the role, and a cardinality constraint.
 data REnd = REnd EName Role Cardinality
 
+--- The name of a role (a string).
 type Role = String
 
 --- Cardinality of a relationship w.r.t. some entity.

@@ -12,12 +12,14 @@ module Database.CDBI.Connection
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , runInTransaction, fail, ok, (>+), (>+=)
-  , sequenceDBAction, sequenceDBAction_, mapDBAction, mapDBAction_
+  , sequenceDBAction, sequenceDBAction_, mapDBAction, mapDBAction_, liftDBAction
+  , runDBAction, runInTransaction, returnDB, failDB, (>+), (>+=)
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
     -- Connections
-  , connectSQLite, disconnect, begin, commit, rollback, runWithDB
+  , connectSQLite, disconnect, writeConnection
+  , begin, commit, rollback, setForeignKeyCheck
+  , runWithDB
   ) where
 
 import Char         ( isDigit )
@@ -25,13 +27,16 @@ import Function     ( on )
 import Global       ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
 import IOExts       ( connectToCommand )
 import IO           ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
-import List         ( init, insertBy, isInfixOf, isPrefixOf, tails )
+import List         ( init, insertBy, intercalate, isInfixOf, isPrefixOf
+                    , nub, tails, (\\) )
 import ReadShowTerm ( readQTerm, readsQTerm, showQTerm )
 import ReadNumeric  ( readInt )
 import System       ( system )
 import Time
 
 import Text.CSV     ( readCSV )
+
+infixl 1 >+, >+=
 
 --- Global flag for database debug mode.
 --- If on, all communication with database is written to stderr.
@@ -58,7 +63,7 @@ fromSQLResult (Right val) = val
 
 --- Print an 'SQLResult' list, i.e., print either the 'DBError'
 --- or the list of result elements.
-printSQLResults :: SQLResult [_] -> IO ()
+printSQLResults :: SQLResult [a] -> IO ()
 printSQLResults (Left  err) = putStrLn $ show err
 printSQLResults (Right res) = mapIO_ print res
 
@@ -86,7 +91,6 @@ data SQLValue
   | SQLBool   Bool
   | SQLDate   ClockTime
   | SQLNull
-  
 
 --- Type identifiers for `SQLValue`s, necessary to determine the type
 --- of the value a column should be converted to.
@@ -98,54 +102,76 @@ data SQLType
   | SQLTypeBool
   | SQLTypeDate
   
---- A DBAction takes a connection and returns an `IO (SQLResult a)`.
-type DBAction a = Connection -> IO (SQLResult a)
-
 -- -----------------------------------------------------------------------------
 -- Database actions with types
 -- -----------------------------------------------------------------------------
 
+--- A `DBAction` takes a connection and performs an IO action that
+--- returns a `SQLResult a` value.
+data DBAction a = DBAction (Connection -> IO (SQLResult a))
+
+--- Runs a `DBAction` on a connection.
+runDBAction :: DBAction a -> Connection -> IO (SQLResult a)
+runDBAction (DBAction a) conn = a conn
+
 --- Run a `DBAction` as a transaction.
---- In case of an `Error` it will rollback all changes, otherwise the changes
---- are committed.
+--- In case of an error, it will rollback all changes, otherwise, the changes
+--- are committed. The transaction is also checked whether foreign key errors
+--- have been introduced so that a transaction which introduces
+--- foreign key errors will never be committed.
 --- @param act  - The `DBAction`
 --- @param conn - The `Connection` to the database on which the transaction
 --- shall be executed.
 runInTransaction :: DBAction a -> DBAction a
-runInTransaction act conn = do
-  begin conn
-  res <- act conn
+runInTransaction act = DBAction $ \conn ->
+  flip runDBAction conn (
+           begin >+
+           getForeignKeyErrors >+= \kes1 ->
+           act >+= \r ->
+           getForeignKeyErrors >+= \kes2 ->
+           returnDB (Right (kes2 \\ kes1, r)) ) >>= \res ->
   case res of
-    Left  _ -> rollback conn >> return res
-    Right _ -> commit   conn >> return res
+    Left err -> runDBAction rollback conn >> return (Left err)
+    Right (newkes,ares) ->
+      if null newkes
+        then runDBAction commit   conn >> return (Right ares)
+        else runDBAction rollback conn >>
+             return (Left (DBError ConstraintViolation (showFKErrors newkes)))
+ where
+  showFKErrors = intercalate "," . nub .
+    concatMap (\row -> if length row < 3 then []
+                                         else [row!!0 ++ "/" ++ row!!2])
 
---- Connect two `DBAction`s.
+--- Connects two `DBAction`s.
 --- When executed this function will execute the first `DBAction`
---- and then execute the second applied to the first result
---- An `Error` will stop either action.
+--- and then execute the second applied to the result of the first action.
+--- A database error will stop either action.
 --- @param x - The `DBAction` that will be executed first
 --- @param y - The `DBAction` hat will be executed afterwards
 --- @return A `DBAction` that wille execute both `DBAction`s.
---- The result is the result of the second `DBAction`.
+---         The result is the result of the second `DBAction`.
 (>+=) :: DBAction a -> (a -> DBAction b) -> DBAction b
-m >+= f = \conn -> do
-  v1 <- m conn
+m >+= f = DBAction $ \conn -> do
+  v1 <- runDBAction m conn
   case v1 of
-    Right val -> f val conn
+    Right val -> runDBAction (f val) conn
     Left  err -> return (Left err)
 
---- Connect two DBActions, but ignore the result of the first.
+--- Connects two `DBAction`s but ignore the result of the first.
 (>+) :: DBAction a -> DBAction b -> DBAction b
 (>+) x y = x >+= (\_ -> y)
 
-      
---- Failing action.
-fail :: DBError -> DBAction a
-fail err _ = return (Left err)
+--- Returns an `SQLResult`.
+returnDB :: SQLResult a -> DBAction a
+returnDB r = DBAction $ \_ -> return r
+
+--- A failed `DBAction` with a specific error.
+failDB :: DBError -> DBAction a
+failDB err = returnDB (Left err)
 
 --- Successful action.
 ok :: a -> DBAction a
-ok val _ = return (Right val)
+ok val = returnDB (Right val)
 
 --- Executes a list of DB actions sequentially and returns the list
 --- of all results.
@@ -170,6 +196,10 @@ mapDBAction f = sequenceDBAction . map f
 --- results.
 mapDBAction_ :: (a -> DBAction _) -> [a] -> DBAction ()
 mapDBAction_ f = sequenceDBAction_ . map f
+ 
+--- Apply a pure function to the result of an I/O action.
+liftDBAction :: (a -> b) -> DBAction a -> DBAction b
+liftDBAction f m = m >+= returnDB . Right . f
 
 -----------------------------------------------------------------------------
 --- Execute a query where the result of the execution is returned.
@@ -186,9 +216,9 @@ mapDBAction_ f = sequenceDBAction_ . map f
 --- the SQLType-List that was given as a parameter if the execution was
 --- successful, otherwise an Error
 select :: String -> [SQLValue] -> [SQLType] -> DBAction [[SQLValue]]
-select query values types conn = 
-  (executeRaw query (map valueToString values) >+=
-  (\a _ -> return (convertValues a types))) conn
+select query values types =
+  executeRaw query (map valueToString values) >+=
+  \a -> returnDB (convertValues a types)
 
 --- execute a query without a result
 --- @param query - The SQL Query as a String, might have '?' as placeholder
@@ -196,28 +226,19 @@ select query values types conn =
 --- @param conn - A Connection to a database where the query will be executed
 --- @return An empty if the execution was successful, otherwise an error
 execute :: String -> [SQLValue] -> DBAction ()
-execute query values conn = 
-  (executeRaw query (map valueToString values)  >+
-  (\_ -> return (Right ()))) conn
+execute query values = 
+  executeRaw query (map valueToString values)  >+ ok ()
   
---- execute a query multiple times with different SQLValues without a result
+--- Executes a query multiple times with different SQLValues without a result
 --- @param query - The SQL Query as a String, might have '?' as placeholder
---- @param values - A list of lists of SQLValues that replace the '?' placeholder
---- (One list for every execution)
---- @param conn - A Connection to a database where the query will be executed
---- @return A empty Result if every execution was successful, otherwise an
---- Error (meaning at least one execution failed). As soon as one
---- execution fails the rest wont be executed.
+--- @param values - A list of lists of SQLValues that replace the '?'
+---                 placeholder (one list for every execution)
+--- @return A void result if every execution was successful, otherwise an
+---         Error (meaning at least one execution failed). As soon as one
+---         execution fails, the rest wont be executed.
 executeMultipleTimes :: String -> [[SQLValue]] -> DBAction ()
-executeMultipleTimes query values conn = do
-  result <- foldl (\res row -> (res >>= \x -> case x of
-                                               Right _ -> execute query row conn
-                                               error   -> return error))
-                  (return (Right ()))
-                  values
-  return result
-
-
+executeMultipleTimes query values = mapDBAction_ (execute query) values
+  
 -- -----------------------------------------------------------------------------
 -- Database connections
 -- -----------------------------------------------------------------------------
@@ -225,9 +246,11 @@ executeMultipleTimes query values conn = do
 --- Data type for database connections.
 --- Currently, only connections to a SQLite3 database are supported,
 --- but other types of connections could easily be added.
---- List of functions that would need to be implemented:
+--- The following functions might need to be re-implemented for other DBs:
 --- A function to connect to the database, disconnect, writeConnection
---- readRawConnectionLine, parseLines, begin, commit, rollback and getColumnNames
+--- readRawConnectionLine, parseLines, begin, commit, rollback,
+--- and getColumnNames
+
 data Connection = SQLiteConnection Handle
 
 --- Connect to a SQLite Database
@@ -236,11 +259,11 @@ data Connection = SQLiteConnection Handle
 connectSQLite :: String -> IO Connection
 connectSQLite db = do
   exsqlite3 <- system "which sqlite3 > /dev/null"
-  when (exsqlite3>0) $
-    error "Database interface `sqlite3' not found. Please install package `sqlite3'!"
-  h <- connectToCommand $ "sqlite3 " ++ db
-  hPutAndFlush h (".mode " ++ if dbWithCSVMode then "csv" else "line")
-  hPutAndFlush h (".log "  ++ if dbWithCSVMode then "off" else "stdout")
+  when (exsqlite3>0) $ error
+    "Database interface `sqlite3' not found. Please install package `sqlite3'!"
+  h <- connectToCommand $ "sqlite3 " ++ db ++ " 2>&1"
+  hPutAndFlush h $ ".mode " ++ if dbWithCSVMode then "csv" else "line"
+  hPutAndFlush h $ ".log "  ++ if dbWithCSVMode then "off" else "stdout"
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
@@ -249,7 +272,7 @@ disconnect (SQLiteConnection h) = hClose h
 
 hPutAndFlush :: Handle -> String -> IO ()
 hPutAndFlush h s = do
-  when dbDebug $ hPutStrLn stderr ("DB>>> " ++ s)
+  when dbDebug $ hPutStrLn stderr ("DB>>> " ++ s) >> hFlush stderr
   hPutStrLn h s >> hFlush h
 
 --- Write a `String` to a `Connection`.
@@ -258,24 +281,44 @@ writeConnection str (SQLiteConnection h) = hPutAndFlush h str
 
 --- Read a line from a `Connection`.
 readRawConnectionLine :: Connection -> IO String
-readRawConnectionLine (SQLiteConnection h) =
-  if dbDebug
-   then do inp <- hGetLine h
-           hPutStrLn stderr ("DB<<< " ++ inp)
-           return inp
-   else hGetLine h
+readRawConnectionLine (SQLiteConnection h) = do
+  inp <- hGetLine h >>= return . stripCR
+  when dbDebug $ hPutStrLn stderr ("DB<<< " ++ inp) >> hFlush stderr
+  return inp
+ where
+  -- Remove CR at end-of-line
+  stripCR [] = []
+  stripCR [c] = if c == '\r' then [] else [c]
+  stripCR (c:cs@(_:_)) = c : stripCR cs
 
 --- Begin a transaction.
-begin :: Connection -> IO ()
-begin conn@(SQLiteConnection _) = writeConnection "begin;" conn
+--- Inside a transaction, foreign key constraints are checked.
+begin :: DBAction ()
+begin = DBAction $ \conn -> do
+  writeConnection "begin;" conn
+  writeConnection "PRAGMA foreign_keys=ON;" conn
+  return (Right ())
 
 --- Commit a transaction.
-commit :: Connection -> IO ()
-commit conn@(SQLiteConnection _) = writeConnection "commit;" conn
+commit :: DBAction ()
+commit = DBAction $ \conn -> do
+  writeConnection "commit;" conn
+  return (Right ())
+
 
 --- Rollback a transaction.
-rollback :: Connection -> IO ()
-rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
+rollback :: DBAction ()
+rollback = DBAction $ \conn -> do
+  writeConnection "rollback;" conn
+  return (Right ())
+
+--- Turn on/off checking of foreign key constraints (SQLite3).
+setForeignKeyCheck :: Bool -> DBAction ()
+setForeignKeyCheck flag = DBAction $ \conn -> do
+  writeConnection ("PRAGMA foreign_keys=" ++ showFlag ++ ";") conn
+  return (Right ())
+ where
+  showFlag = if flag then "ON" else "OFF"
 
 --- Executes an action dependent on a connection on a database
 --- by connecting to the datebase. The connection will be kept open
@@ -283,8 +326,9 @@ rollback conn@(SQLiteConnection _) = writeConnection "rollback;" conn
 --- @param str - name of the database (e.g. "database.db")
 --- @param action - an action parameterized over a database connection
 --- @return the result of the action
-runWithDB :: String -> (Connection -> IO a) -> IO a
-runWithDB dbname dbaction = ensureSQLiteConnection dbname >>= dbaction
+runWithDB :: String -> DBAction a -> IO (SQLResult a)
+runWithDB dbname dbaction =
+  ensureSQLiteConnection dbname >>= runDBAction dbaction
 
 --- Executes an action dependent on a connection on a database
 --- by connecting and disconnecting to the datebase.
@@ -302,44 +346,53 @@ runWithDB' dbname dbaction = do
 -- Executing SQL statements
 -- -----------------------------------------------------------------------------
 
---- Execute a SQL statement.
+--- Executes an SQL statement.
 --- The statement may contain '?' placeholders and a list of parameters which
 --- should be inserted at the respective positions.
 --- The result is a list of list of strings where every single list
 --- represents a row of the result.
 executeRaw :: String -> [String] -> DBAction [[String]]
-executeRaw query para conn = do
-  let queryInserted = (insertParams query para)
-  case queryInserted of
-    Left err -> return $ Left err
-    Right qu -> do
+executeRaw query para =
+  case insertParams query para of
+    Left err -> failDB err
+    Right qu -> DBAction $ \conn -> do
       writeConnection qu conn 
       parseLines conn
   
 
 --- Returns a list with the names of every column in a table
---- The parameter is the name of the table and a connection
+--- The parameter is the name of the table.
 getColumnNames :: String -> DBAction [String]
--- SQLite Implementation
-getColumnNames table conn@(SQLiteConnection _) = do
+-- SQLite implementation
+getColumnNames table = DBAction $ \conn -> do
   writeConnection ("pragma table_info(" ++ table ++ ");") conn
   result <- parseLines conn
   case result of
     Left err -> return (Left err)
     Right xs -> return (Right (map retrieveColumnNames xs))
-      where retrieveColumnNames :: [String] -> String
-            retrieveColumnNames (_:y:_) = y
+ where
+  retrieveColumnNames xs = case xs of
+    (_:y:_) -> y
+    _       -> error "Database.CDBI.Connection.getColumnNames: wrong arguments"
+
+--- Returns a list of unsatisfisfied foreign key constraints (SQLite).
+--- In a correct database state, the list should be empty.
+getForeignKeyErrors :: DBAction [[String]]
+-- SQLite implementation
+getForeignKeyErrors = DBAction $ \conn -> do
+  writeConnection ("PRAGMA foreign_key_check;") conn
+  parseLines conn
 
 --- Read every output line of a Connection and return a Result with a list
 --- of lists of strings where every list of strings represents a row.
 --- NULL-Values have to be empty Strings instead of "NULL", all other
 --- values should be represented exactly as they are saved in the database
-parseLines :: DBAction [[String]]
---- SQLite Implementation
+parseLines :: Connection -> IO (SQLResult [[String]])
+--- SQLite implementation
 parseLines conn@(SQLiteConnection _) = do
   random <- getRandom
   case random of
-    Left  err -> fail err conn
+    Left  err -> return (Left err)
     Right val -> do
       writeConnection ("select '" ++ val ++ "';") conn
       parseSQLOutputUntil val conn
@@ -378,27 +431,27 @@ insertParams qu xs =
 
 --- Reads the current output of SQLite line by line until a specific stop
 --- string is found. This is necessary because it is otherwise not possible
---- to determine the end of the output without blocking. (SQLite-Function)
-parseSQLOutputUntil :: String -> DBAction [[String]]
+--- to determine the end of the output without blocking. (SQLite function)
+parseSQLOutputUntil :: String -> Connection -> IO (SQLResult [[String]])
 parseSQLOutputUntil = if dbWithCSVMode then parseCSVUntil else parseLinesUntil
 
-parseCSVUntil :: String -> DBAction [[String]]
+parseCSVUntil :: String -> Connection -> IO (SQLResult [[String]])
 parseCSVUntil stop conn = do
   output <- readLinesUntil
-  case output of Left err -> fail err conn
-                 Right csvlines -> ok (concatMap readCSV csvlines) conn
+  case output of Left err -> return $ Left err
+                 Right csvlines -> return $ Right (concatMap readCSV csvlines)
  where
   readLinesUntil = do
     line <- readConnectionLine conn
     case line of
-      Left err -> fail err conn
+      Left err -> return $ Left err
       Right s -> if s == stop
-                   then ok [] conn
+                   then return $ Right []
                    else do rest <- readLinesUntil
-                           case rest of Left err -> fail err conn
-                                        Right ls -> ok (s:ls) conn
+                           case rest of Left err -> return $ Left err
+                                        Right ls -> return $ Right (s:ls)
   
-parseLinesUntil :: String -> DBAction [[String]]
+parseLinesUntil :: String -> Connection -> IO (SQLResult [[String]])
 parseLinesUntil stop conn@(SQLiteConnection _) = next
   where
   next = do
@@ -407,22 +460,24 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
       Left (DBError NoLineError "") -> do
             rest <- next
             case rest of
-              Left err -> fail err conn
-              Right xs -> ok ([]:xs) conn
-      Left err  -> readRawConnectionLine conn >> fail err conn
+              Left err -> return $ Left err
+              Right xs -> return $ Right ([]:xs)
+      Left err  -> readRawConnectionLine conn >> return (Left err)
       Right val
         | val == "index" -> next
-        | val == stop -> ok [[]] conn
+        | val == stop -> return (Right [[]])
         | otherwise -> do
             rest <- next
             case rest of
-              Left  err         -> fail err conn
-              Right ([]:xs)     -> ok ([val]:xs) conn
-              Right ((x:ys):xs) -> ok ((val:(x:ys)):xs) conn
+              Left  err         -> return $ Left err
+              Right ([]:xs)     -> return $ Right ([val]:xs)
+              Right ((x:ys):xs) -> return $ Right ((val:(x:ys)):xs)
+              Right []          ->
+               error "Database.CDBI.Connection.parseLinesUntil: wrong arguments"
 
 --- Read a line from a SQLite Connection and check if it represents a value
-readConnectionLine :: DBAction String
-readConnectionLine conn@(SQLiteConnection _) =
+readConnectionLine :: Connection -> IO (SQLResult String)
+readConnectionLine conn =
   check `liftIO` readRawConnectionLine conn
  where
   --- Ensure that a line read from a database connection represents a value.
@@ -464,10 +519,11 @@ getValue s =
 --- Identify the error kind.
 getErrorKindSQLite :: String -> DBErrorKind
 getErrorKindSQLite str
-    | "Error: UNIQUE constraint" `isPrefixOf` str = ConstraintViolation
-    | "no such table"            `isInfixOf`  str = TableDoesNotExist
-    | "syntax error"             `isInfixOf`  str = SyntaxError
-    | "Error: database is locked" `isInfixOf` str = LockedDBError
+    | "UNIQUE constraint"         `isInfixOf` str = ConstraintViolation
+    | "FOREIGN KEY constraint"    `isInfixOf` str = ConstraintViolation
+    | "no such table"             `isInfixOf` str = TableDoesNotExist
+    | "syntax error"              `isInfixOf` str = SyntaxError
+    | "database is locked"        `isInfixOf` str = LockedDBError
     | otherwise                                   = UnknownError
 
 

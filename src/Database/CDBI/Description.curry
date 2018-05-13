@@ -7,9 +7,9 @@
 --- by the use of this module.
 ---
 --- @author Mike Tallarek, changes by Julia Krone
---- @version 0.2
---- @category database
 --- ----------------------------------------------------------------------------
+{-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
+
 module Database.CDBI.Description where
 
 import Time
@@ -176,17 +176,21 @@ getColumnValueBuilder (ColDesc _ _ f _) = f
 getColumnValueSelector :: ColumnDescription a -> (SQLValue -> a)
 getColumnValueSelector (ColDesc _ _ _ f) = f
 
--- Conversion functions
+-- Conversion functions from Curry values to SQL values.
 toValueOrNull :: (a -> SQLValue) -> Maybe a -> SQLValue
 toValueOrNull _ Nothing  = SQLNull
 toValueOrNull f (Just v) = f v
 
+sqlKeyOrNull :: (key -> Int) -> Maybe key -> SQLValue
+sqlKeyOrNull _       Nothing  = SQLNull
+sqlKeyOrNull key2int (Just k) = SQLInt (key2int k)
+
 sqlIntOrNull :: (Maybe Int) -> SQLValue
-sqlIntOrNull Nothing = SQLNull
+sqlIntOrNull Nothing  = SQLNull
 sqlIntOrNull (Just a) = SQLInt a
 
 sqlFloatOrNull :: (Maybe Float) -> SQLValue
-sqlFloatOrNull Nothing = SQLNull
+sqlFloatOrNull Nothing  = SQLNull
 sqlFloatOrNull (Just a) = SQLFloat a
 
 sqlCharOrNull :: (Maybe Char) -> SQLValue
@@ -207,6 +211,11 @@ sqlBoolOrNull (Just a) = SQLBool a
 sqlDateOrNull :: (Maybe ClockTime) -> SQLValue
 sqlDateOrNull Nothing = SQLNull
 sqlDateOrNull (Just a) = SQLDate a
+
+-- Conversion functions from SQL values to Curry values.
+keyOrNothing :: (Int -> key) -> SQLValue -> Maybe key
+keyOrNothing _      SQLNull    = Nothing
+keyOrNothing keycon (SQLInt k) = Just (keycon k)
 
 intOrNothing :: SQLValue -> (Maybe Int)
 intOrNothing SQLNull = Nothing
