@@ -11,17 +11,17 @@ module Database.CDBI.Criteria (
        Criteria(..), Constraint(..), ColVal(..), GroupBy,
        Option, Value(..), CValue, CColumn, Condition(..), Specifier(..),
        emptyCriteria, int, float, char, string, bool, date,
-       col, idVal, colNum, colVal, colValAlt, isNull, isNotNull, equal, 
+       col, idVal, colNum, colVal, colValAlt, isNull, isNotNull, equal,
        (.=.), notEqual, (./=.), greaterThan, (.>.), lessThan, (.<.),
-       greaterThanEqual, (.<=.), lessThanEqual, (.>=.), 
+       greaterThanEqual, (.<=.), lessThanEqual, (.>=.),
        like, (.~.), between, isIn, (.<->.), toCValue, toCColumn,
-       ascOrder, descOrder, groupBy, having, groupByCol, trCriteria, 
+       ascOrder, descOrder, groupBy, having, groupByCol, trCriteria,
        trConstraint, trCondition, trValue, trColumn,trSpecifier,
-       trOption, sumIntCol, sumFloatCol, countCol, avgIntCol, 
+       trOption, sumIntCol, sumFloatCol, countCol, avgIntCol,
        avgFloatCol, minCol, maxCol, condition, noHave) where
 
-import List (intercalate)
-import Time (ClockTime)
+import Data.List (intercalate)
+import Data.Time (ClockTime)
 
 import Database.CDBI.Connection  (SQLValue (..), SQLType(..), valueToString)
 import Database.CDBI.Description (Column (..), Table)
@@ -34,25 +34,25 @@ import Database.CDBI.Description (Column (..), Table)
 data Criteria = Criteria Constraint (Maybe GroupBy)
 
 --- specifier for queries
-data Specifier = Distinct | All 
+data Specifier = Distinct | All
 
 --- datatype to represent order-by statement
-data Option = AscOrder CValue 
+data Option = AscOrder CValue
             | DescOrder CValue
-  
---- datatype to represent group-by statement  
+
+--- datatype to represent group-by statement
 data GroupBy = GroupBy CValue GroupByTail
 
 --- subtype for additional columns or having-Clause in group-by statement
 data GroupByTail = Having Condition | GBT CValue GroupByTail |  NoHave
 
 --- datatype for conditions inside a having-clause
-data Condition = Con Constraint 
-               | Fun String Specifier Constraint 
-               | HAnd [Condition] 
+data Condition = Con Constraint
+               | Fun String Specifier Constraint
+               | HAnd [Condition]
                | HOr [Condition]
                | Neg Condition
-  
+
 --- A datatype to compare values.
 --- Can be either a SQLValue or a Column with an additional
 --- Integer (rename-number). The Integer is for dealing with renamed
@@ -60,7 +60,7 @@ data Condition = Con Constraint
 --- the column will be named as usual ("Table"."Column"), otherwise it will
 --- be named "nTable"."Column" in the query This is for being able to do
 --- complex "where exists" constraints
-data Value a = Val SQLValue | Col (Column a) Int 
+data Value a = Val SQLValue | Col (Column a) Int
 
 --- A datatype thats a combination between a Column and a Value
 --- (Needed for update queries)
@@ -162,11 +162,11 @@ colVal c v = ColVal (toCColumn c) (toCValue v)
 --- @param cl - The column name
 --- @param s - The SQLValue
 colValAlt :: String -> String -> SQLValue -> ColVal
-colValAlt table cl s = 
-     ColVal (toCColumn 
-            (Column ("\"" ++ cl ++ "\"") 
-                    ("\"" ++ table ++ "\".\"" ++ "\"" ++ cl ++ "\""))) 
-            (Val s) 
+colValAlt table cl s =
+     ColVal (toCColumn
+            (Column ("\"" ++ cl ++ "\"")
+                    ("\"" ++ table ++ "\".\"" ++ "\"" ++ cl ++ "\"")))
+            (Val s)
 
 --- IsNull construnctor
 --- @param v1 - First Value
@@ -300,14 +300,14 @@ noHave = NoHave
 condition :: Constraint -> Condition
 condition con = Con con
 
----Constructor for aggregation function sum for columns of type Int 
+---Constructor for aggregation function sum for columns of type Int
 --- having-clauses.
 ---@param spec - specifier Distinct or All
 ---@param c - Column that is to be summed up
 ---@param v - value the result is compared to (has to be of type Int)
 ---@param op - relating operator
-sumIntCol :: Specifier -> Value Int -> Value Int 
-                       -> (Value () -> Value () -> Constraint) -> Condition   
+sumIntCol :: Specifier -> Value Int -> Value Int
+                       -> (Value () -> Value () -> Constraint) -> Condition
 sumIntCol spec c v op =  (Fun "Sum " spec (op (toCValue c) (toCValue v)))
 
 --- Constructor for aggregation function sum for columns of type float
@@ -316,18 +316,18 @@ sumIntCol spec c v op =  (Fun "Sum " spec (op (toCValue c) (toCValue v)))
 ---@param c - Column that is to be summed up
 ---@param v - value the result is compared to (has to be of type float)
 ---@param op - relating operator
-sumFloatCol :: Specifier -> Value Float -> Value Float 
-                       -> (Value () -> Value () -> Constraint) -> Condition   
+sumFloatCol :: Specifier -> Value Float -> Value Float
+                       -> (Value () -> Value () -> Constraint) -> Condition
 sumFloatCol spec c v op =  (Fun "Sum " spec (op (toCValue c) (toCValue v)))
 
---- Constructor for aggregation function avg for columns of type Int 
+--- Constructor for aggregation function avg for columns of type Int
 --- in having-clauses.
 ---@param spec - specifier Distinct or All
 ---@param c - Column that is to be averaged
 ---@param v - value the result is compared to (has to be of type float)
 ---@param op - relating operator
 avgIntCol :: Specifier -> Value Int -> Value Float
-                       -> (Value () -> Value () -> Constraint) -> Condition 
+                       -> (Value () -> Value () -> Constraint) -> Condition
 avgIntCol spec c v op =  (Fun "Avg " spec (op (toCValue c) (toCValue v)))
 
 --- Constructor for aggregation function avg for columns of type float
@@ -337,7 +337,7 @@ avgIntCol spec c v op =  (Fun "Avg " spec (op (toCValue c) (toCValue v)))
 ---@param v - value the result is compared to (has to be of type float)
 ---@param op - relating operator
 avgFloatCol :: Specifier -> Value Float -> Value Float
-                       -> (Value () -> Value () -> Constraint) -> Condition 
+                       -> (Value () -> Value () -> Constraint) -> Condition
 avgFloatCol spec c v op =  (Fun "Avg " spec (op (toCValue c) (toCValue v)))
 
 ---Constructor for aggregation function count in having-clauses.
@@ -345,25 +345,25 @@ avgFloatCol spec c v op =  (Fun "Avg " spec (op (toCValue c) (toCValue v)))
 ---@param c - Column which elements are to be counted
 ---@param v - value the result is compared to (has to be of type Int).
 ---@param op - relating operator
-countCol :: Specifier -> Value _ -> Value Int 
-                       -> (Value () -> Value () -> Constraint) -> Condition 
+countCol :: Specifier -> Value _ -> Value Int
+                       -> (Value () -> Value () -> Constraint) -> Condition
 countCol spec c v op = (Fun "Count " spec (op (toCValue c) (toCValue v)))
 
 --- Constructor for aggregation function min in having-clauses.
 --- @param spec - specifier Distinct or All
 ---@param c - column the minimal element has to be extracted from
 ---@param v - value to compare to the minimal value, same type as column
----@param op - operator 
-minCol :: Specifier -> Value a -> Value a 
-                       -> (Value () -> Value () -> Constraint) -> Condition 
+---@param op - operator
+minCol :: Specifier -> Value a -> Value a
+                       -> (Value () -> Value () -> Constraint) -> Condition
 minCol spec c v op = (Fun "Min " spec (op (toCValue c) (toCValue v)))
 
 --- Constructor for aggregation function max in having-clauses.
 --- @param spec - specifier Distinct or All
 ---@param c - column the maximal element has to be extracted from
 ---@param v - value to compare to the maximal value, same type as column
----@param op - operator 
-maxCol :: Specifier -> Value a -> Value a 
+---@param op - operator
+maxCol :: Specifier -> Value a -> Value a
                        -> (Value () -> Value () -> Constraint) -> Condition
 maxCol spec c v op = (Fun "Max " spec (op (toCValue c) (toCValue v)))
 
@@ -390,33 +390,33 @@ trCriteria crit = case crit of
 -- Translate an Order-by to a string in a sql-query
 trOption :: [Option] -> String
 trOption []       = ""
-trOption (ls@((AscOrder _):_)) = " order by " ++ 
+trOption (ls@((AscOrder _):_)) = " order by " ++
                                      intercalate ", " (map trOption' ls)
-trOption (ls@((DescOrder _):_)) = " order by " ++ 
+trOption (ls@((DescOrder _):_)) = " order by " ++
                                      intercalate ", " (map trOption' ls)
 
 trOption' :: Option -> String
 trOption' (AscOrder  v) = trValue v ++ " asc"
 trOption' (DescOrder v) = trValue v ++ " desc"
- 
--- translate a group-by to a string in a sql-query                                    
+
+-- translate a group-by to a string in a sql-query
 trGroup :: (Maybe GroupBy) -> String
 trGroup Nothing = ""
-trGroup (Just (GroupBy cs gbTail)) = " group by " ++ trValue cs ++ 
-                                        trTail gbTail 
+trGroup (Just (GroupBy cs gbTail)) = " group by " ++ trValue cs ++
+                                        trTail gbTail
 
 trTail :: GroupByTail -> String
 trTail (GBT cs gbTail) = ", "++ trValue cs ++ trTail gbTail
 trTail NoHave = ""
 trTail (Having cond) = " Having " ++ trCondition cond
 
-trCondition :: Condition -> String      
+trCondition :: Condition -> String
 trCondition (HAnd conds) = intercalate " and " (map trCondition conds)
 trCondition (HOr conds) = intercalate " or " (map trCondition conds)
 trCondition (Con cons) = trConstraint cons
 trCondition (Neg cond) = "(not "++ (trCondition cond)++")"
 trCondition (Fun fun spec cons) = "("++fun ++ "("++trSpecifier spec ++constr
-  where ('(':'(':constr) = trConstraint cons 
+  where ('(':'(':constr) = trConstraint cons
 
 
 -- Translate a Constraint to a string in a sql-query

@@ -1,12 +1,11 @@
 {
     "name": "cdbi",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
     "synopsis": "Libraries for type-safe database programming",
     "category": [ "Database" ],
     "dependencies": {
-        "base": ">= 1.0.0, < 2.0.0",
-        "csv" : ">= 1.0.0"
+        "csv" : ">= 2.0.0"
     },
     "exportedModules": [ "Database.ERD",
                          "Database.CDBI.Connection",

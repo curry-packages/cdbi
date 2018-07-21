@@ -12,7 +12,7 @@
 
 module Database.CDBI.Description where
 
-import Time
+import Data.Time
 
 import Database.CDBI.Connection (SQLType, SQLValue(..))
 
@@ -26,13 +26,13 @@ import Database.CDBI.Connection (SQLType, SQLValue(..))
 --- second function doing the same but converting the key value always to
 --- SQLNull to ensure that keys are auto incrementing and a
 --- function transforming a list of SQLValues to an instance of this entity
-data EntityDescription a = ED String 
-                              [SQLType] 
-                              (a -> [SQLValue]) 
+data EntityDescription a = ED String
+                              [SQLType]
+                              (a -> [SQLValue])
                               (a -> [SQLValue]) --for insertion
                               ([SQLValue] -> a)
 
-  
+
 --- Entity-types can be combined (For Example Student and Lecture could be
 --- combined to Data StuLec = StuLec Student Lecture). If a description for
 --- this new type is written CDBI can look up that type in the database
@@ -41,12 +41,12 @@ data EntityDescription a = ED String
 --- rename the table to "table as ntable" and a list of SQLTypes (The types
 --- that make up that entity type).  Furthermore there has to be a function
 --- that transform a list of SQLValues into this combined type, and two
---- functions that transform the combined type into a list of SQLValues, the 
+--- functions that transform the combined type into a list of SQLValues, the
 --- first one for updates, the second one for insertion.
 --- The list of sqlvalues needs to match what is returned by the database.
-data CombinedDescription a = CD [(Table, Int, [SQLType])] 
-                                ([SQLValue] -> a) 
-                                (a -> [[SQLValue]]) 
+data CombinedDescription a = CD [(Table, Int, [SQLType])]
+                                ([SQLValue] -> a)
+                                (a -> [[SQLValue]])
                                 (a -> [[SQLValue]]) -- for insertion
 
 --- A type representing tablenames
@@ -63,15 +63,15 @@ type Table = String
 data Column _ = Column String String
 
 --- Datatype representing columns for selection.
---- This datatype has to be distinguished from type Column which is just for 
+--- This datatype has to be distinguished from type Column which is just for
 --- definition of conditions.
 --- The type definition consists of the complete name (including tablename),
 --- the SQLType of the column
---- and two functions for the mapping from SQLValue into the resulttype and 
+--- and two functions for the mapping from SQLValue into the resulttype and
 --- the other way around
-data ColumnDescription a = ColDesc String 
-                                   SQLType 
-                                   (a -> SQLValue) 
+data ColumnDescription a = ColDesc String
+                                   SQLType
+                                   (a -> SQLValue)
                                    (SQLValue -> a)
 
 --- A constructor for CombinedDescription.
@@ -84,26 +84,26 @@ data ColumnDescription a = ColDesc String
 --- @param f - A function that describes how the combined entity is built.
 --- Takes two entities that make up the combined entity as parameters
 --- and combines those into the combined entity.
-combineDescriptions :: EntityDescription a -> 
-                       Int -> 
-                       EntityDescription b -> 
-                       Int -> 
-                       (a -> b -> c) -> 
-                       (c -> (a, b)) -> 
+combineDescriptions :: EntityDescription a ->
+                       Int ->
+                       EntityDescription b ->
+                       Int ->
+                       (a -> b -> c) ->
+                       (c -> (a, b)) ->
                        CombinedDescription c
 combineDescriptions ed1 rename1 ed2 rename2 f1 f2 =
   CD [(getTable ed1, rename1, getTypes ed1),
-      (getTable ed2, rename2, getTypes ed2)] 
+      (getTable ed2, rename2, getTypes ed2)]
      createFunction1 createFunction2 createFunction3
-    where createFunction1 xs = f1 ((getToEntity ed1) 
+    where createFunction1 xs = f1 ((getToEntity ed1)
                                    (take lengthEd1 xs))
-                                  ((getToEntity ed2) 
+                                  ((getToEntity ed2)
                                    (drop lengthEd1 xs))
              where lengthEd1 = length (getTypes ed1)
-          createFunction2 combEnt = 
+          createFunction2 combEnt =
             let (ent1, ent2) = f2 combEnt in
               ((getToValues ed1) ent1) : [(getToValues ed2) ent2]
-          createFunction3 combEnt = 
+          createFunction3 combEnt =
             let (ent1, ent2) = f2 combEnt in
               ((getToInsertValues ed1) ent1) : [(getToInsertValues ed2) ent2]
 
@@ -114,25 +114,25 @@ combineDescriptions ed1 rename1 ed2 rename2 f1 f2 =
 --- Takes the entity that should be added and the combined entity as parameter
 --- and combines those into a new version of the combined entity.
 --- @param cd - The already existing CD
-addDescription :: EntityDescription a -> 
-                  Int -> 
-                  (a -> b -> b) -> 
-                  (b -> a) -> 
-                  CombinedDescription b -> 
+addDescription :: EntityDescription a ->
+                  Int ->
+                  (a -> b -> b) ->
+                  (b -> a) ->
+                  CombinedDescription b ->
                   CombinedDescription b
 addDescription ed1 rename f1 f2 (CD xs f1' f2' f3') =
-  CD ((getTable ed1, rename, getTypes ed1) : xs) 
-     createFunction1 
+  CD ((getTable ed1, rename, getTypes ed1) : xs)
+     createFunction1
      createFunction2
      createFunction3
-    where createFunction1 ys = 
-            f1 ((getToEntity ed1) 
-               (take lengthEd1 ys)) 
+    where createFunction1 ys =
+            f1 ((getToEntity ed1)
+               (take lengthEd1 ys))
                (f1' (drop lengthEd1 ys))
             where lengthEd1 = length (getTypes ed1)
-          createFunction2 combEnt = 
+          createFunction2 combEnt =
             [(getToValues ed1) (f2 combEnt)] ++ (f2' combEnt)
-          createFunction3 combEnt = 
+          createFunction3 combEnt =
             [(getToInsertValues ed1) (f2 combEnt)] ++ (f3' combEnt)
 
 
