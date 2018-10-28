@@ -5,7 +5,8 @@
     "synopsis": "Libraries for type-safe database programming",
     "category": [ "Database" ],
     "dependencies": {
-        "csv" : ">= 2.0.0"
+        "csv" : ">= 2.0.0",
+        "base": ">= 2.0.0"
     },
     "exportedModules": [ "Database.ERD",
                          "Database.CDBI.Connection",
