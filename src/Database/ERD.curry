@@ -25,6 +25,7 @@ import Time
 --- The components are the name of the ER model, the list of entities,
 --- and the list of relationships.
 data ERD = ERD ERDName [Entity] [Relationship]
+  deriving Show
 
 --- The name of an ER model (a string).
 type ERDName = String -- used as the name of the generated module
@@ -32,6 +33,7 @@ type ERDName = String -- used as the name of the generated module
 --- Data type to represent the entities of an ER model.
 --- Each entity consists of a name and a list of attributes.
 data Entity = Entity EName [Attribute]
+  deriving Show
 
 --- The name of an entity (a string).
 type EName = String
@@ -44,6 +46,7 @@ type EName = String
 ---   (no key, primary key, or unique)
 --- * a flag indicating whether this attribute can contain null values
 data Attribute = Attribute AName Domain Key Null
+  deriving Show
 
 --- The name of an attribute (a string).
 type AName = String
@@ -53,6 +56,7 @@ type AName = String
 data Key = NoKey
          | PKey
          | Unique
+  deriving (Eq, Show)
 
 --- Type of the flag of an attribute indicating whether the attribute
 --- can contain null values (if the flag has value `True`).
@@ -69,12 +73,14 @@ data Domain = IntDom      (Maybe Int)
             | DateDom     (Maybe CalendarTime)
             | UserDefined String (Maybe String)
             | KeyDom      String  -- for foreign keys
+  deriving Show
 
 
 --- Data type to represent the relationships of an ER model.
 --- Each relationship consists of a name and a list of end points
 --- (usually with two elements).
 data Relationship = Relationship RName [REnd]
+  deriving Show
 
 --- The name of a relationship (a string).
 type RName = String
@@ -82,6 +88,7 @@ type RName = String
 --- An end point of a relationship which consists of the name
 --- of an entity, the name of the role, and a cardinality constraint.
 data REnd = REnd EName Role Cardinality
+  deriving Show
 
 --- The name of a role (a string).
 type Role = String
@@ -94,10 +101,12 @@ type Role = String
 --- cardinality (0,n)).
 data Cardinality = Exactly Int
                  | Between Int MaxValue
+  deriving Show
 
 --- The upper bound of a cardinality which is either a finite number
 --- or infinite.
 data MaxValue = Max Int | Infinite
+  deriving Show
 
 
 --- Read an ERD specification from a file containing a single ERD term.

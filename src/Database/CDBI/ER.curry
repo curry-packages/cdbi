@@ -47,8 +47,7 @@ module Database.CDBI.ER (
 import Char         ( isDigit )
 import FilePath     ( (</>) )
 import List         ( intercalate, nub )
-import ReadShowTerm ( readQTerm, showQTerm, readQTermListFile
-                    , writeQTermListFile )
+import ReadShowTerm ( showQTerm, readQTermListFile, writeQTermListFile )
 import Time         ( ClockTime )
 
 import Database.CDBI.Connection
@@ -113,12 +112,11 @@ getEntries :: Specifier ->
               [Option] ->
               Maybe Int  -> 
               DBAction [a]
-getEntries spec en crit op limit =
+getEntries spec en crit op limit = do
   let query = "select " ++ trSpecifier spec ++"* from '" ++ getTable en ++
                  "' " ++ trCriteria crit ++ trOption op ++ trLimit limit ++";"
-  in
-  select query [] (getTypes en) >+= \vals ->
-  returnDB $ Right $ map (getToEntity en) vals
+  vals <- select query [] (getTypes en)
+  return $ map (getToEntity en) vals
 
 
 --- Gets a single Column from the database. 
@@ -136,16 +134,15 @@ getColumn :: [SetOp] ->
              [Option] -> 
              Maybe Int ->
              DBAction [a]
-getColumn _      []       _       _     = returnDB $ Right []
-getColumn setops (s:sels) options limit =
+getColumn _      []       _       _     = return []
+getColumn setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trSingleSelectQuery sel )
                       (trSingleSelectQuery s)
                       (zip setops sels))
                 ++ trOption options ++ trLimit limit++" ;")
-  in
-  select query [] (getSingleType s) >+= \vals ->
-  returnDB $ Right (map ((getSingleValFunc s) . head) vals)
+  vals <- select query [] (getSingleType s)
+  return (map ((getSingleValFunc s) . head) vals)
 
 
 --- Gets two Columns from the database. 
@@ -163,17 +160,16 @@ getColumnTuple :: [SetOp] ->
                   [Option] -> 
                   Maybe Int ->
                   DBAction [(a,b)]
-getColumnTuple _      []       _       _     = returnDB $ Right []
-getColumnTuple setops (s:sels) options limit =
+getColumnTuple _      []       _       _     = return []
+getColumnTuple setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trTupleSelectQuery sel )
                       (trTupleSelectQuery s)
                       (zip setops sels))
                ++ trOption options ++ trLimit limit++" ;")
       (fun1, fun2) = getTupleValFuncs s
-  in
-  select query [] (getTupleTypes s) >+= \vals ->
-  returnDB $ Right (map (\ [val1, val2] -> ((fun1 val1),(fun2 val2))) vals)
+  vals <- select query [] (getTupleTypes s)
+  return (map (\ [val1, val2] -> ((fun1 val1),(fun2 val2))) vals)
 
 --- Gets three Columns from the database. 
 --- @param setops - list of Setoperators to combine queries if more than one is
@@ -190,18 +186,16 @@ getColumnTriple :: [SetOp] ->
                    [Option] ->
                    Maybe Int -> 
                    DBAction [(a,b,c)]
-getColumnTriple _      []       _       _     = returnDB $ Right []
-getColumnTriple setops (s:sels) options limit =
+getColumnTriple _      []       _       _     = return []
+getColumnTriple setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trTripleSelectQuery sel )
                       (trTripleSelectQuery s)
                       (zip setops sels))
                ++ trOption options ++ trLimit limit++" ;")
       (fun1, fun2, fun3) = getTripleValFuncs s
-  in
-  select query [] (getTripleTypes s) >+= \vals ->
-  returnDB $ Right
-    (map (\ [val1, val2, val3] -> (fun1 val1, fun2 val2, fun3 val3)) vals)
+  vals <- select query [] (getTripleTypes s)
+  return (map (\ [val1, val2, val3] -> (fun1 val1, fun2 val2, fun3 val3)) vals)
 
 --- Gets four Columns from the database. 
 --- @param setops - list of Setoperators to combine queries if more than one is 
@@ -218,17 +212,16 @@ getColumnFourTuple :: [SetOp]
                    -> [Option]
                    -> Maybe Int 
                    -> DBAction [(a,b,c,d)]
-getColumnFourTuple _      []       _       _     = returnDB $ Right []
-getColumnFourTuple setops (s:sels) options limit =
+getColumnFourTuple _      []       _       _     = return []
+getColumnFourTuple setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trFourTupleSelectQuery sel)
                       (trFourTupleSelectQuery s)
                       (zip setops sels))
                ++ trOption options ++ trLimit limit++" ;")
       (fun1, fun2, fun3, fun4) = getFourTupleValFuncs s
-  in
-  select query [] (getFourTupleTypes s) >+= \vals ->
-  returnDB $ Right $ map (\ [val1, val2, val3, val4] -> ((fun1 val1),
+  vals <- select query [] (getFourTupleTypes s)
+  return $ map (\ [val1, val2, val3, val4] -> ((fun1 val1),
                                                (fun2 val2), 
                                                (fun3 val3),
                                                (fun4 val4)))
@@ -249,18 +242,16 @@ getColumnFiveTuple :: [SetOp]
                    -> [Option]
                    -> Maybe Int 
                    -> DBAction [(a,b,c,d,e)]
-getColumnFiveTuple _      []       _       _     = returnDB $ Right []
-getColumnFiveTuple setops (s:sels) options limit =
+getColumnFiveTuple _      []       _       _     = return []
+getColumnFiveTuple setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trFiveTupleSelectQuery sel)
                       (trFiveTupleSelectQuery s)
                       (zip setops sels))
                ++ trOption options ++ trLimit limit++" ;")
       (fun1, fun2, fun3, fun4, fun5) = getFiveTupleValFuncs s
-  in
-  select query [] (getFiveTupleTypes s) >+= \vals ->
-  returnDB $ Right $
-           map (\ [val1, val2, val3, val4, val5] -> ((fun1 val1),
+  vals <- select query [] (getFiveTupleTypes s)
+  return $ map (\ [val1, val2, val3, val4, val5] -> ((fun1 val1),
                                                      (fun2 val2), 
                                                      (fun3 val3),
                                                      (fun4 val4),
@@ -282,18 +273,16 @@ getColumnSixTuple :: [SetOp]
                   -> [Option]
                   -> Maybe Int 
                   -> DBAction [(a,b,c,d,e,f)]
-getColumnSixTuple _      []       _       _     = returnDB (Right [])
-getColumnSixTuple setops (s:sels) options limit =
+getColumnSixTuple _      []       _       _     = return []
+getColumnSixTuple setops (s:sels) options limit = do
   let query = ((foldl (\quest (so, sel) -> quest ++ trSetOp so ++
                                            trSixTupleSelectQuery sel)
                       (trSixTupleSelectQuery s)
                       (zip setops sels))
                ++ trOption options ++ trLimit limit++" ;")
       (fun1, fun2, fun3, fun4, fun5, fun6) = getSixTupleValFuncs s
-  in
-  select query [] (getSixTupleTypes s) >+= \vals ->
-  returnDB $ Right $
-            map (\ [val1, val2, val3, val4, val5, val6] -> ((fun1 val1),
+  vals <- select query [] (getSixTupleTypes s)
+  return $ map (\ [val1, val2, val3, val4, val5, val6] -> ((fun1 val1),
                                                            (fun2 val2), 
                                                            (fun3 val3),
                                                            (fun4 val4),
@@ -317,12 +306,12 @@ getEntriesCombined :: Specifier ->
                       [Option] ->
                       Maybe Int -> 
                       DBAction [a]
-getEntriesCombined spec cd@(CD _ f _ _) joins crit op limit =
+getEntriesCombined spec cd@(CD _ f _ _) joins crit op limit = do
   let query = "select "++ trSpecifier spec ++ "* from " ++ 
               getJoinString cd joins ++ " " ++
               trCriteria crit ++ trOption op ++ trLimit limit ++ ";"
-  in select query [] (getJoinTypes cd) >+= \xs ->
-     returnDB (Right (map f xs))
+  xs <- select query [] (getJoinTypes cd)
+  return (map f xs)
 
 --- Inserts combined entries.
 --- @param cd  - The CombinedDescription that describes the entity
@@ -330,7 +319,7 @@ getEntriesCombined spec cd@(CD _ f _ _) joins crit op limit =
 --- @return A Result without parameter if saving worked or an Error if there
 --- was a problem
 insertEntryCombined :: CombinedDescription a -> a -> DBAction ()
-insertEntryCombined (CD desc _ _ f3) ent = mapDBAction_ save (zip desc (f3 ent))
+insertEntryCombined (CD desc _ _ f3) ent = mapM_ save (zip desc (f3 ent))
   where
     save :: ((Table, Int, [SQLType]), [SQLValue]) -> DBAction ()
     save ((table, _, types), vals) =
@@ -370,9 +359,9 @@ updateEntries en (ColVal cl val : ys) const =
 --- @return A Result without parameter if everything went right,
 --- an Error if something went wrong
 updateEntry :: EntityDescription a -> a -> DBAction ()
-updateEntry ed ent =
-  let table = getTable ed in
-  getColumnNames table >+= \columns ->
+updateEntry ed ent = do
+  let table = getTable ed
+  columns <- getColumnNames table
   let values     = getToValues ed ent
       SQLInt key = head values
       keycol     = head columns
@@ -380,20 +369,19 @@ updateEntry ed ent =
       column     = Column ("\"" ++ keycol ++ "\"")
                           ("\"" ++ table ++ "\".\"" ++ keycol ++ "\"")
       const      = col column .=. int key
-  in updateEntries ed colvals const
+  updateEntries ed colvals const
 
 --- Same as updateEntry but for combined Data
 updateEntryCombined :: CombinedDescription a -> a -> DBAction ()
-updateEntryCombined (CD desc _ f2 _) ent =
-  mapDBAction_ update (zip desc (f2 ent))
+updateEntryCombined (CD desc _ f2 _) ent = mapM_ update (zip desc (f2 ent))
  where
   update :: ((Table, Int, [SQLType]), [SQLValue]) -> DBAction ()
-  update ((table, _, _), values) =
+  update ((table, _, _), values) = do
     let SQLInt key = (\(x:_) -> x) values
         const = col (Column "\"Key\"" ("\"" ++ table ++ "\".\"Key\"")) 
                 .=. int key
-    in getColumnNames table >+= \columns ->
-    let ((col1,val1):colval) = zip columns values in
+    columns <- getColumnNames table
+    let ((col1,val1):colval) = zip columns values
     execute ("update '" ++ table ++ "' set " ++
             (foldl (\a (c, v) -> a ++ ", " ++
                                  c ++ " = " ++ (valueToString v))
@@ -464,15 +452,15 @@ getJoinTypes (CD nametype _ _ _) = getJoinString' (unzip3 nametype)
 --- @param en - The EntityDescription that describes the entity
 --- @return A Result with a key or an Error if something went wrong.
 getLastInsertedKey :: EntityDescription a -> DBAction Int
-getLastInsertedKey en =
+getLastInsertedKey en = do
   let query = "select distinct last_insert_rowid() from '" ++ getTable en ++
                  "';"
-  in select query [] [SQLTypeInt] >+= \r ->
-     selectInt r
+  r <- select query [] [SQLTypeInt]
+  selectInt r
  where
   selectInt vals = case vals of
     [[key]] -> maybe (failDB unknownKeyError)
-                     (returnDB . Right)
+                     return
                      (Database.CDBI.Description.intOrNothing key)
     _ -> failDB unknownKeyError
 
@@ -497,9 +485,9 @@ getAllEntries endescr =
 --- @return a DB result with the list of entries if everything went right,
 ---          or an error if something went wrong
 getCondEntries :: EntityDescription a -> (a -> Bool) -> DBAction [a]
-getCondEntries endescr encond =
-  getAllEntries endescr >+= \vals ->
-  returnDB (Right (filter encond vals))
+getCondEntries endescr encond = do
+  vals <- getAllEntries endescr
+  return (filter encond vals)
 
 --- Gets an entry of an entity with a given key.
 --- @param endescr   - the EntityDescription describing the entities
@@ -508,15 +496,15 @@ getCondEntries endescr encond =
 --- @param key       - the key of the entity to be fetched
 --- @return a DB result with the entry if everything went right,
 ---         or an error if something went wrong
-getEntryWithKey :: EntityDescription a -> Column k
+getEntryWithKey :: Show kid => EntityDescription a -> Column k
                 -> (kid -> Value k) -> kid -> DBAction a
-getEntryWithKey endescr keycolumn keyval key =
-  getEntries All endescr
+getEntryWithKey endescr keycolumn keyval key = do
+  vals <- getEntries All endescr
             (Criteria (equal (colNum keycolumn 0) (keyval key)) Nothing)
             []
-            Nothing >+= \vals ->
+            Nothing
   if null vals then failDB keyNotFoundError
-               else returnDB (Right (head vals))
+               else return (head vals)
  where
   keyNotFoundError =
     DBError UnknownError $
@@ -546,10 +534,10 @@ getEntriesWithColVal endescr valcolumn val =
 ---         error if something went wrong
 insertNewEntry :: EntityDescription a -> (a -> k -> a) -> (Int -> k) -> a
                -> DBAction a
-insertNewEntry endescr setkey keycons entity =
-  insertEntry endescr entity >+
-  getLastInsertedKey endescr >+= \key ->
-  returnDB (Right (setkey entity (keycons key)))
+insertNewEntry endescr setkey keycons entity = do
+  insertEntry endescr entity
+  key <- getLastInsertedKey endescr
+  return $ setkey entity (keycons key)
 
 --- Deletes an existing entry from the database.
 --- @param endescr - the EntityDescription describing the entities to be deleted
@@ -590,14 +578,14 @@ readDatabaseKey :: String -> (Int -> enkey) -> String -> Maybe enkey
 readDatabaseKey enname toenkey s =
   let (ens,ks) = splitAt (length enname) s
    in if ens==enname && all isDigit ks
-        then Just (toenkey (readQTerm ks))
+        then Just (toenkey (read ks))
         else Nothing
 
 -- Saves all entries of an entity as terms in a file.
 --- @param endescr - the EntityDescription of the entities to be saved
 --- @param dbname  - name of the database (e.g. "database.db")
 --- @param path    - directory where term file is written
-saveDBTerms :: EntityDescription a -> String -> String -> IO ()
+saveDBTerms :: Show a => EntityDescription a -> String -> String -> IO ()
 saveDBTerms endescr dbname path = do
   allentries <- runQueryOnDB dbname (getAllEntries endescr)
   let savefile = path </> getTable endescr ++ ".terms"
@@ -612,15 +600,15 @@ saveDBTerms endescr dbname path = do
 --- @param endescr - the EntityDescription of the entities to be restored
 --- @param dbname  - name of the database (e.g. "database.db")
 --- @param path    - directory where term file was saved
-restoreDBTerms :: EntityDescription a -> String -> String -> IO ()
+restoreDBTerms :: Read a => EntityDescription a -> String -> String -> IO ()
 restoreDBTerms endescr dbname path = do
   let savefile = path </> getTable endescr ++ ".terms"
   putStr $ "Restoring from '" ++ savefile ++ "'..."
   entries <- readQTermListFile savefile
-  runJustTransactionOnDB dbname (
-    setForeignKeyCheck False >+
-    deleteEntries endescr Nothing >+
-    restoreEntries endescr entries )
+  runJustTransactionOnDB dbname $ do
+    setForeignKeyCheck False
+    deleteEntries endescr Nothing
+    restoreEntries endescr entries
   putStrLn "done"
 
 --- Executes a DB action on a database and returns the result.

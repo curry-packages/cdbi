@@ -12,7 +12,6 @@ module Database.CDBI.Connection
     SQLValue(..), SQLType(..), SQLResult, fromSQLResult, printSQLResults
   , DBAction, DBError (..), DBErrorKind (..), Connection (..)
     -- DBActions
-  , sequenceDBAction, sequenceDBAction_, mapDBAction, mapDBAction_, liftDBAction
   , runDBAction, runInTransaction, returnDB, failDB, (>+), (>+=)
   , executeRaw, execute, select
   , executeMultipleTimes, getColumnNames, valueToString
@@ -63,7 +62,7 @@ fromSQLResult (Right val) = val
 
 --- Print an 'SQLResult' list, i.e., print either the 'DBError'
 --- or the list of result elements.
-printSQLResults :: SQLResult [a] -> IO ()
+printSQLResults :: Show a => SQLResult [a] -> IO ()
 printSQLResults (Left  err) = putStrLn $ show err
 printSQLResults (Right res) = mapIO_ print res
 
@@ -71,6 +70,7 @@ printSQLResults (Right res) = mapIO_ print res
 --- `DBError`s are composed of an `DBErrorKind` and a `String`
 --- describing the error more explicitly.
 data DBError = DBError DBErrorKind String
+ deriving (Eq,Show)
 
 --- The different kinds of errors.
 data DBErrorKind
@@ -81,6 +81,7 @@ data DBErrorKind
   | NoLineError
   | LockedDBError
   | UnknownError
+ deriving (Eq,Show)
 
 --- Data type for SQL values, used during the communication with the database.
 data SQLValue
@@ -91,6 +92,7 @@ data SQLValue
   | SQLBool   Bool
   | SQLDate   ClockTime
   | SQLNull
+  deriving Show
 
 --- Type identifiers for `SQLValue`s, necessary to determine the type
 --- of the value a column should be converted to.
@@ -123,13 +125,13 @@ runDBAction (DBAction a) conn = a conn
 --- @param conn - The `Connection` to the database on which the transaction
 --- shall be executed.
 runInTransaction :: DBAction a -> DBAction a
-runInTransaction act = DBAction $ \conn ->
-  flip runDBAction conn (
-           begin >+
-           getForeignKeyErrors >+= \kes1 ->
-           act >+= \r ->
-           getForeignKeyErrors >+= \kes2 ->
-           returnDB (Right (kes2 \\ kes1, r)) ) >>= \res ->
+runInTransaction act = DBAction $ \conn -> do
+  res <- flip runDBAction conn $ do
+           begin
+           kes1 <- getForeignKeyErrors
+           r <- act
+           kes2 <- getForeignKeyErrors
+           return (kes2 \\ kes1, r)
   case res of
     Left err -> runDBAction rollback conn >> return (Left err)
     Right (newkes,ares) ->
@@ -169,37 +171,12 @@ returnDB r = DBAction $ \_ -> return r
 failDB :: DBError -> DBAction a
 failDB err = returnDB (Left err)
 
---- Successful action.
-ok :: a -> DBAction a
-ok val = returnDB (Right val)
-
---- Executes a list of DB actions sequentially and returns the list
---- of all results.
-sequenceDBAction :: [DBAction a] -> DBAction [a]
-sequenceDBAction = foldr seqT (ok [])
- where
-  seqT t ts = t >+= \x -> ts >+= \xs -> ok (x:xs)
-
---- Executes a list of DB actions sequentially, ignoring their
---- results.
-sequenceDBAction_ :: [DBAction _] -> DBAction ()
-sequenceDBAction_ = foldr (>+) (ok ())
-
---- Applies a function that yields DB actions to all elements of a
---- list, executes the transaction sequentially, and collects their
---- results.
-mapDBAction :: (a -> DBAction b) -> [a] -> DBAction [b]
-mapDBAction f = sequenceDBAction . map f
-
---- Applies a function that yields DB actions to all elements of a
---- list, executes the transactions sequentially, and ignores their
---- results.
-mapDBAction_ :: (a -> DBAction _) -> [a] -> DBAction ()
-mapDBAction_ f = sequenceDBAction_ . map f
- 
---- Apply a pure function to the result of an I/O action.
-liftDBAction :: (a -> b) -> DBAction a -> DBAction b
-liftDBAction f m = m >+= returnDB . Right . f
+--- The `Monad` instance of `DBAction`.
+instance Monad DBAction where
+  a1 >>= a2 = a1 >+= a2
+  a1 >>  a2 = a1 >+  a2
+  return x  = returnDB (Right x)
+  fail s    = returnDB (Left (DBError UnknownError s))
 
 -----------------------------------------------------------------------------
 --- Execute a query where the result of the execution is returned.
@@ -227,7 +204,7 @@ select query values types =
 --- @return An empty if the execution was successful, otherwise an error
 execute :: String -> [SQLValue] -> DBAction ()
 execute query values = 
-  executeRaw query (map valueToString values)  >+ ok ()
+  executeRaw query (map valueToString values)  >+ return ()
   
 --- Executes a query multiple times with different SQLValues without a result
 --- @param query - The SQL Query as a String, might have '?' as placeholder
@@ -237,7 +214,7 @@ execute query values =
 ---         Error (meaning at least one execution failed). As soon as one
 ---         execution fails, the rest wont be executed.
 executeMultipleTimes :: String -> [[SQLValue]] -> DBAction ()
-executeMultipleTimes query values = mapDBAction_ (execute query) values
+executeMultipleTimes query values = mapM_ (execute query) values
   
 -- -----------------------------------------------------------------------------
 -- Database connections
