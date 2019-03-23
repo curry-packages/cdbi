@@ -21,17 +21,18 @@ module Database.CDBI.Connection
   , runWithDB
   ) where
 
+import Data.Time
 import Data.Char      ( isDigit )
 import Data.Function  ( on )
-import Data.Global    ( Global, GlobalSpec(..), global, readGlobal, writeGlobal )
-import IOExts         ( connectToCommand )
-import System.IO      ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 import Data.List      ( init, insertBy, intercalate, isInfixOf, isPrefixOf
                       , nub, tails, (\\) )
-import ReadShowTerm   ( readQTerm, readsQTerm, showQTerm )
-import Numeric        ( readInt )
+import System.IO      ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 import System.Process ( system )
-import Data.Time
+import Control.Monad  ( when, unless )
+import ReadShowTerm   ( readQTerm, readsQTerm, showQTerm )
+import Global         ( Global, GlobalSpec(..), global
+                      , readGlobal, writeGlobal )
+import IOExts         ( connectToCommand )
 
 import Text.CSV       ( readCSV )
 
@@ -64,7 +65,7 @@ fromSQLResult (Right val) = val
 --- or the list of result elements.
 printSQLResults :: Show a => SQLResult [a] -> IO ()
 printSQLResults (Left  err) = putStrLn $ show err
-printSQLResults (Right res) = mapIO_ print res
+printSQLResults (Right res) = mapM_ print res
 
 
 --- `DBError`s are composed of an `DBErrorKind` and a `String`
@@ -171,11 +172,20 @@ returnDB r = DBAction $ \_ -> return r
 failDB :: DBError -> DBAction a
 failDB err = returnDB (Left err)
 
+instance Functor DBAction where
+  fmap f x = x >>= \a -> return (f a)
+
+instance Applicative DBAction where
+  pure      = return
+  a1 <*> a2 = a1 >>= \x -> fmap x a2
+
 --- The `Monad` instance of `DBAction`.
 instance Monad DBAction where
   a1 >>= a2 = a1 >+= a2
   a1 >>  a2 = a1 >+  a2
   return x  = returnDB (Right x)
+
+instance MonadFail DBAction where
   fail s    = returnDB (Left (DBError UnknownError s))
 
 -----------------------------------------------------------------------------
@@ -455,7 +465,7 @@ parseLinesUntil stop conn@(SQLiteConnection _) = next
 --- Read a line from a SQLite Connection and check if it represents a value
 readConnectionLine :: Connection -> IO (SQLResult String)
 readConnectionLine conn =
-  check `liftIO` readRawConnectionLine conn
+  check <$> readRawConnectionLine conn
  where
   --- Ensure that a line read from a database connection represents a value.
   check :: String -> SQLResult String
@@ -547,9 +557,9 @@ convertValue (s, SQLTypeString) = if null s
                                     else SQLString (decodeStringFromSQL s)
 
 convertValue (s, SQLTypeInt) =
-  case readInt s of
-    [(a,_)]   -> SQLInt a
-    _         -> SQLNull
+  case reads s of
+    [(a,"")] -> SQLInt a
+    _        -> SQLNull
 
 convertValue (s, SQLTypeFloat) =
   if isFloat s
@@ -618,7 +628,7 @@ ensureSQLiteConnection db = do
 
 -- Performs an action on all open database connections.
 withAllDBConnections :: (Connection -> IO _) -> IO ()
-withAllDBConnections f = readGlobal openDBConnections >>= mapIO_ (f . snd)
+withAllDBConnections f = readGlobal openDBConnections >>= mapM_ (f . snd)
 
 --- Closes all database connections. Should be called when no more
 --- database access will be necessary.

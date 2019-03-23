@@ -7,8 +7,8 @@
 --- ----------------------------------------------------------------
 {-# OPTIONS_CYMAKE -Wno-incomplete-patterns #-}
 
-module Database.CDBI.QueryTypes(
-   SetOp(..),Join(..),innerJoin, crossJoin,
+module Database.CDBI.QueryTypes (
+  SetOp(..),Join(..),innerJoin, crossJoin,
   ColumnSingleCollection(..), ColumnTupleCollection,
   ColumnTripleCollection, ColumnFourTupleCollection,
   ColumnFiveTupleCollection, ColumnSixTupleCollection,
@@ -28,8 +28,8 @@ module Database.CDBI.QueryTypes(
   caseResultBool)
  where
 
-import Data.List (intercalate)
-import Data.Time (ClockTime)
+import Data.List(intercalate)
+import Data.Time(ClockTime)
 
 import Database.CDBI.Connection
 import Database.CDBI.Criteria
@@ -469,6 +469,7 @@ getTableString (TC tab alias Nothing) join2 =
 getTableString (TC tab alias (Just (join, tc))) join2 =
      (" '" ++tab ++ "'" ++ (asTable tab alias)++join2
        ++(trJoinPart1 join) ++ (getTableString tc (trJoinPart2 join)))
+
 
 getCharValue :: SQLValue -> Char
 getCharValue (SQLChar char) = char

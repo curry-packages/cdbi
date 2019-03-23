@@ -45,10 +45,10 @@ module Database.CDBI.ER (
     caseResultFloat, caseResultString, caseResultChar, caseResultBool) where
 
 import Data.Char       ( isDigit )
-import System.FilePath ( (</>) )
 import Data.List       ( intercalate, nub )
-import ReadShowTerm    ( showQTerm, readQTermListFile, writeQTermListFile )
 import Data.Time       ( ClockTime )
+import System.FilePath ( (</>) )
+import ReadShowTerm    ( showQTerm, readQTermListFile, writeQTermListFile )
 
 import Database.CDBI.Connection
 import Database.CDBI.Criteria
