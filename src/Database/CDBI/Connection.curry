@@ -32,7 +32,7 @@ import Control.Monad  ( when, unless )
 import ReadShowTerm   ( readQTerm, readsQTerm, showQTerm )
 import Global         ( Global, GlobalSpec(..), global
                       , readGlobal, writeGlobal )
-import IOExts         ( connectToCommand )
+import System.IOExts  ( connectToCommand )
 
 import Text.CSV       ( readCSV )
 
