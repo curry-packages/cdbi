@@ -241,6 +241,9 @@ connectSQLite db = do
   h <- connectToCommand $ "sqlite3 " ++ db ++ " 2>&1"
   hPutAndFlush h $ ".mode " ++ if dbWithCSVMode then "csv" else "line"
   hPutAndFlush h $ ".log "  ++ if dbWithCSVMode then "off" else "stdout"
+  -- we increase the timeout to avoid 'OperationalError: database is locked'
+  -- see https://stackoverflow.com/questions/3172929/operationalerror-database-is-locked/3172950
+  hPutAndFlush h $ ".timeout 10000"
   return $ SQLiteConnection h
 
 --- Disconnect from a database.
