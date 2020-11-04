@@ -25,9 +25,9 @@
 ------------------------------------------------------------------------------
 {-# LANGUAGE CPP #-}
 
-module Global( Global, GlobalSpec(..), global
-             , readGlobal, safeReadGlobal, writeGlobal)
- where
+module Global
+  ( Global, GlobalSpec(..), global
+  , readGlobal, safeReadGlobal, writeGlobal) where
 
 ----------------------------------------------------------------------
 

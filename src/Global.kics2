@@ -98,7 +98,9 @@ external_d_C_global val (C_Persistent cname) _ _ =
  where initGlobalFile name = do
          ex <- doesFileExist name
          if ex then return ()
-               else writeFile name (show val++"\n")
+               else do writeFile name (show val ++ "\n")
+                       system ("chmod 600 " ++ name)
+                       return ()
 
 external_d_C_prim_readGlobal :: Curry_Prelude.Curry a => C_Global a -> Cover -> ConstStore
                              -> Curry_Prelude.C_IO a
@@ -114,7 +116,8 @@ external_d_C_prim_readGlobal (C_Global_Pers name) _ _ = fromIO $
     case reads s of
       [(val,"")] -> return val
       _          -> throw (IOException $ "Persistent file `" ++ name ++
-                                         "' contains malformed contents")
+                                         "' contains malformed contents:\n" ++
+                                         s)
 
 external_d_C_prim_writeGlobal :: Curry_Prelude.Curry a => C_Global a -> a
                               -> Cover -> ConstStore -> Curry_Prelude.C_IO Curry_Prelude.OP_Unit
