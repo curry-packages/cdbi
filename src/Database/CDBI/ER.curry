@@ -48,7 +48,6 @@ import Data.Char       ( isDigit )
 import Data.List       ( intercalate, nub )
 import Data.Time       ( ClockTime )
 import System.FilePath ( (</>) )
-import ReadShowTerm    ( showQTerm, readQTermListFile, writeQTermListFile )
 
 import Database.CDBI.Connection
 import Database.CDBI.Criteria
@@ -588,12 +587,13 @@ readDatabaseKey enname toenkey s =
 saveDBTerms :: Show a => EntityDescription a -> String -> String -> IO ()
 saveDBTerms endescr dbname path = do
   allentries <- runQueryOnDB dbname (getAllEntries endescr)
-  let savefile = path </> getTable endescr ++ ".terms"
+  let savefile    = path </> getTable endescr ++ ".terms"
+      showentries = unlines (map show allentries)
   if null path
-   then putStrLn (unlines (map showQTerm allentries)) -- show only
-   else do putStr $ "Saving into '" ++ savefile ++ "'..."
-           writeQTermListFile savefile allentries
-           putStrLn "done"
+    then putStrLn showentries -- show only
+    else do putStr $ "Saving into '" ++ savefile ++ "'..."
+            writeFile savefile showentries
+            putStrLn "done"
 
 --- Restores entries saved in a term file by deleting all existing entries
 --- and inserting the saved entries.
@@ -604,7 +604,7 @@ restoreDBTerms :: Read a => EntityDescription a -> String -> String -> IO ()
 restoreDBTerms endescr dbname path = do
   let savefile = path </> getTable endescr ++ ".terms"
   putStr $ "Restoring from '" ++ savefile ++ "'..."
-  entries <- readQTermListFile savefile
+  entries <- readFile savefile >>= return . map read . lines 
   runJustTransactionOnDB dbname $ do
     setForeignKeyCheck False
     deleteEntries endescr Nothing

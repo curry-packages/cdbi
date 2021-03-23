@@ -29,7 +29,6 @@ import Data.List      ( init, insertBy, intercalate, isInfixOf, isPrefixOf
 import System.IO      ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 import System.Process ( system )
 import Control.Monad  ( when, unless )
-import ReadShowTerm   ( readQTerm, readsQTerm, showQTerm )
 import Global         ( Global, GlobalSpec(..), global
                       , readGlobal, writeGlobal )
 import System.IOExts  ( connectToCommand )
@@ -566,19 +565,19 @@ convertValue (s, SQLTypeInt) =
 
 convertValue (s, SQLTypeFloat) =
   if isFloat s
-    then case readsQTerm s of
+    then case reads s of
            []         -> SQLNull
            ((a,_):_)  -> SQLFloat a
     else SQLNull
 
 convertValue (s, SQLTypeBool) =
-  case readsQTerm s of
+  case reads s of
     [(True,[])]  -> SQLBool True
     [(False,[])] -> SQLBool False
     _            -> SQLNull
 
 convertValue (s, SQLTypeDate) =
-  case readsQTerm s of
+  case reads s of
     [(CalendarTime a b c d e f g, [])]
        -> SQLDate (toClockTime (CalendarTime a b c d e f g))
     _  -> SQLNull
@@ -595,7 +594,7 @@ convertValue (s:_, SQLTypeChar) = SQLChar s
 -- 2. Replacing all apostrophes in the resulting string with double apostrophes
 --    (this is necessary to transfer the encoded string correctly to SQLite)
 encodeStringToSQL :: String -> String
-encodeStringToSQL s = doubleQuote (init (tail (showQTerm s)))
+encodeStringToSQL s = doubleQuote (init (tail (show s)))
  where
   doubleQuote "" = ""
   doubleQuote (c:cs) | c == '''  = "''" ++ doubleQuote cs
@@ -603,7 +602,7 @@ encodeStringToSQL s = doubleQuote (init (tail (showQTerm s)))
 
 -- Decodes SQL string back into a Curry string into an SQL string.
 decodeStringFromSQL :: String -> String
-decodeStringFromSQL s = readQTerm ('"' : s ++ ['"'])
+decodeStringFromSQL s = read ('"' : s ++ ['"'])
 
 -- Does a string represent a Float?
 isFloat :: String -> Bool
