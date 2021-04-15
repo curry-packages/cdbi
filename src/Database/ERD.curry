@@ -15,11 +15,11 @@ module Database.ERD
   , readERDTermFile, writeERDTermFile
   ) where
 
-import Char         (isSpace)
-import Directory    (getAbsolutePath)
-import IO
-import ReadShowTerm (readUnqualifiedTerm)
-import Time
+import Data.Char        (isSpace)
+import Data.Time
+import System.Directory (getAbsolutePath)
+import System.IO
+import ReadShowTerm     (readUnqualifiedTerm)
 
 --- Data type to represent entity/relationship diagrams.
 --- The components are the name of the ER model, the list of entities,

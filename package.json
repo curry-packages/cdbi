@@ -1,12 +1,19 @@
 {
     "name": "cdbi",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
     "synopsis": "Libraries for type-safe database programming",
     "category": [ "Database" ],
     "dependencies": {
-        "base": ">= 1.0.0, < 2.0.0",
-        "csv" : ">= 1.0.0"
+        "base"       : ">= 3.0.0, < 4.0.0",
+        "csv"        : ">= 3.0.0, < 4.0.0",
+        "directory"  : ">= 3.0.0, < 4.0.0",
+        "filepath"   : ">= 3.0.0, < 4.0.0",
+        "global"     : ">= 3.0.0, < 4.0.0",
+        "io-extra"   : ">= 3.0.0, < 4.0.0",
+        "process"    : ">= 3.0.0, < 4.0.0",
+        "read-legacy": ">= 3.0.0, < 4.0.0",
+        "time"       : ">= 3.0.0, < 4.0.0"
     },
     "exportedModules": [ "Database.ERD",
                          "Database.CDBI.Connection",
@@ -15,8 +22,8 @@
                          "Database.CDBI.ER",
                          "Database.CDBI.QueryTypes" ],
     "compilerCompatibility": {
-        "pakcs": ">= 2.0.0",
-        "kics2": ">= 2.0.0"
+        "pakcs": ">= 3.0.0, < 4.0.0",
+        "kics2": ">= 3.0.0, < 4.0.0"
     },
     "license": "BSD-3-Clause",
     "licenseFile": "LICENSE",
