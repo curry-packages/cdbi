@@ -21,18 +21,16 @@ module Database.CDBI.Connection
   , runWithDB
   ) where
 
-import Data.Time
-import Data.Char      ( isDigit )
+import Control.Monad  ( when )
 import Data.Function  ( on )
 import Data.List      ( init, insertBy, intercalate, isInfixOf, isPrefixOf
                       , nub, tails, (\\) )
 import System.IO      ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
-import System.Process ( system )
-import Control.Monad  ( when, unless )
-import Global         ( Global, GlobalSpec(..), global
-                      , readGlobal, writeGlobal )
-import System.IOExts  ( connectToCommand )
 
+import Data.Global    ( GlobalT, globalTemporary, readGlobalT, writeGlobalT )
+import Data.Time
+import System.IOExts  ( connectToCommand )
+import System.Process ( system )
 import Text.CSV       ( readCSV )
 
 infixl 1 >+, >+=
@@ -612,31 +610,31 @@ isFloat [] = False
 
 -----------------------------------------------------------------------------
 -- A global value that keeps all open database handles.
-openDBConnections :: Global [(String,Connection)]
-openDBConnections = global [] Temporary
+openDBConnections :: GlobalT [(String,Connection)]
+openDBConnections = globalTemporary []
 
 -- Connect to SQLite database. Either create a new connection
 -- (and keep it) or re-use a previous connection.
 ensureSQLiteConnection :: String -> IO Connection
 ensureSQLiteConnection db = do
-  dbConnections <- readGlobal openDBConnections
+  dbConnections <- readGlobalT openDBConnections
   maybe (addNewConnection dbConnections) return (lookup db dbConnections)
  where
   addNewConnection dbConnections = do
     dbcon <- connectSQLite db
-    writeGlobal openDBConnections $ -- sort against deadlock
+    writeGlobalT openDBConnections $ -- sort against deadlock
        insertBy ((<=) `on` fst) (db,dbcon) dbConnections
     return dbcon
 
 -- Performs an action on all open database connections.
 withAllDBConnections :: (Connection -> IO _) -> IO ()
-withAllDBConnections f = readGlobal openDBConnections >>= mapM_ (f . snd)
+withAllDBConnections f = readGlobalT openDBConnections >>= mapM_ (f . snd)
 
 --- Closes all database connections. Should be called when no more
 --- database access will be necessary.
 closeDBConnections :: IO ()
 closeDBConnections = do
   withAllDBConnections disconnect
-  writeGlobal openDBConnections []
+  writeGlobalT openDBConnections []
 
 -----------------------------------------------------------------------------
