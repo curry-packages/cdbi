@@ -27,7 +27,7 @@ import Data.List      ( init, insertBy, intercalate, isInfixOf, isPrefixOf
                       , nub, tails, (\\) )
 import System.IO      ( Handle, hPutStrLn, hGetLine, hFlush, hClose, stderr )
 
-import Data.Global    ( GlobalT, globalTemporary, readGlobalT, writeGlobalT )
+import Data.Global    ( GlobalT, globalT, readGlobalT, writeGlobalT )
 import Data.Time
 import System.IOExts  ( connectToCommand )
 import System.Process ( system )
@@ -611,7 +611,7 @@ isFloat [] = False
 -----------------------------------------------------------------------------
 -- A global value that keeps all open database handles.
 openDBConnections :: GlobalT [(String,Connection)]
-openDBConnections = globalTemporary []
+openDBConnections = globalT "Database.CDBI.Connection.openDBConnections" []
 
 -- Connect to SQLite database. Either create a new connection
 -- (and keep it) or re-use a previous connection.
