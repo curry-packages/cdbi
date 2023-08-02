@@ -590,10 +590,10 @@ saveDBTerms endescr dbname path = do
   let savefile    = path </> getTable endescr ++ ".terms"
       showentries = unlines (map show allentries)
   if null path
-    then putStrLn showentries -- show only
-    else do putStr $ "Saving into '" ++ savefile ++ "'..."
+    then putStrLn showentries -- show only when the is empty
+    else do --putStr $ "Saving into '" ++ savefile ++ "'..."
             writeFile savefile showentries
-            putStrLn "done"
+            --putStrLn "done"
 
 --- Restores entries saved in a term file by deleting all existing entries
 --- and inserting the saved entries.
@@ -603,13 +603,13 @@ saveDBTerms endescr dbname path = do
 restoreDBTerms :: Read a => EntityDescription a -> String -> String -> IO ()
 restoreDBTerms endescr dbname path = do
   let savefile = path </> getTable endescr ++ ".terms"
-  putStr $ "Restoring from '" ++ savefile ++ "'..."
+  --putStr $ "Restoring from '" ++ savefile ++ "'..."
   entries <- readFile savefile >>= return . map read . lines 
   runJustTransactionOnDB dbname $ do
     setForeignKeyCheck False
     deleteEntries endescr Nothing
     restoreEntries endescr entries
-  putStrLn "done"
+  --putStrLn "done"
 
 --- Executes a DB action on a database and returns the result.
 --- An error is raised if the DB action produces an error.
