@@ -24,7 +24,7 @@
     "license": "BSD-3-Clause",
     "licenseFile": "LICENSE",
     "source": {
-        "git": "https://git.ps.informatik.uni-kiel.de/curry-packages/cdbi.git",
+        "git": "https://github.com/curry-packages/cdbi.git",
         "tag": "$version"
     }
 }
